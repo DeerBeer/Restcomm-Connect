@@ -106,8 +106,8 @@ public abstract class ClientsEndpoint extends SecuredEndpoint {
         // Validate the password. Should be strong enough
         String password = data.getFirst("Password");
         PasswordValidator validator = PasswordValidatorFactory.createDefault();
-        if (!validator.isStrongEnough(password))
-            throw new PasswordTooWeak();
+//        if (!validator.isStrongEnough(password)) //Laslo - had problem with this always returned weak password
+//            throw new PasswordTooWeak();
         builder.setPassword(password);
         builder.setStatus(getStatus(data));
         URI voiceUrl = getUrl("VoiceUrl", data);

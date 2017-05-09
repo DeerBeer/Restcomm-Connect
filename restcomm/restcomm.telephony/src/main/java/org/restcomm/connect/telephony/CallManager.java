@@ -86,6 +86,7 @@ import org.restcomm.connect.telephony.api.SwitchProxy;
 import org.restcomm.connect.telephony.api.UpdateCallScript;
 import org.restcomm.connect.telephony.api.util.B2BUAHelper;
 import org.restcomm.connect.telephony.api.util.CallControlHelper;
+import org.restcomm.connect.telephony.api.util.PushAPIController;
 import scala.concurrent.Await;
 import scala.concurrent.Future;
 import scala.concurrent.duration.Duration;
@@ -193,6 +194,8 @@ public final class CallManager extends UntypedActor {
     private String imsDomain;
     private String imsAccount;
 
+    private PushAPIController pushAPIController;
+
     // used for sending warning and error logs to notification engine and to the console
     private void sendNotification(String errMessage, int errCode, String errType, boolean createNotification) {
         NotificationsDao notifications = storage.getNotificationsDao();
@@ -275,6 +278,7 @@ public final class CallManager extends UntypedActor {
         this.activeProxy = primaryProxyUri;
         this.activeProxyUsername = primaryProxyUsername;
         this.activeProxyPassword = primaryProxyPassword;
+        this.pushAPIController = new PushAPIController();
 
         numberOfFailedCalls = new AtomicInteger();
         numberOfFailedCalls.set(0);
@@ -479,6 +483,9 @@ public final class CallManager extends UntypedActor {
                 CallRequest callRequest = new CallRequest(fromUser, toUser, CallRequest.Type.CLIENT,
                         client.getAccountSid(), false, false);
                 if (executePreOutboundAction(callRequest)) {
+
+                    this.pushAPIController.sendPushRequest(fromUser, toUser);
+
                     if (B2BUAHelper.redirectToB2BUA(request, client, toClient, storage, sipFactory, patchForNatB2BUASessions)) {
                         if(logger.isInfoEnabled()) {
                             logger.info("Call to CLIENT.  myHostIp: " + myHostIp + " mediaExternalIp: " + mediaExternalIp + " toHost: "
@@ -1587,6 +1594,7 @@ public final class CallManager extends UntypedActor {
                 }
             }
         } else {
+
             String errMsg = "The SIP Client "+request.to()+" is not registered or does not exist";
             logger.warning(errMsg);
             sendNotification(errMsg, 11008, "error", true);

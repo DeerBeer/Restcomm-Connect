@@ -54,6 +54,8 @@ import org.restcomm.connect.dao.entities.Client;
 import org.restcomm.connect.dao.entities.Registration;
 import org.restcomm.connect.commons.dao.Sid;
 
+ import static javax.servlet.sip.SipServletResponse.SC_NOT_FOUND;
+
 /**
   * Helper methods for proxying SIP messages between Restcomm clients that are connecting in peer to peer mode
   *
@@ -70,11 +72,25 @@ import org.restcomm.connect.commons.dao.Sid;
      public static final String B2BUA_LAST_FINAL_RESPONSE = "lastFinalResponse";
      private static final String B2BUA_LINKED_SESSION = "linkedSession";
      private static final String CDR_SID = "callDetailRecord_sid";
+     private static final int MAX_NUMBER_OF_RETRIES = 5; //TODO move to configuration
 
      private static final Logger logger = Logger.getLogger(B2BUAHelper.class);
 
      // private static CallDetailRecord callRecord = null;
      private static DaoManager daoManager;
+
+    /**
+     * @param request
+     * @param client
+     * @param toClient
+     * @throws IOException
+     */
+    // This is used for redirect calls to Restcomm clients from Restcomm Clients
+    public static boolean redirectToB2BUA(final SipServletRequest request, final Client client, Client toClient,
+                                          DaoManager storage, SipFactory sipFactory, final boolean patchForNat) throws IOException {
+        return redirectToB2BUA(request, client, toClient, storage, sipFactory, patchForNat, 0);
+
+    }
 
      /**
       * @param request
@@ -84,7 +100,7 @@ import org.restcomm.connect.commons.dao.Sid;
       */
      // This is used for redirect calls to Restcomm clients from Restcomm Clients
      public static boolean redirectToB2BUA(final SipServletRequest request, final Client client, Client toClient,
-                                           DaoManager storage, SipFactory sipFactory, final boolean patchForNat) throws IOException {
+                                           DaoManager storage, SipFactory sipFactory, final boolean patchForNat, final int numberOfRetry) throws IOException {
          request.getSession().setAttribute("lastRequest", request);
 
          if (logger.isInfoEnabled()) {
@@ -189,6 +205,16 @@ import org.restcomm.connect.commons.dao.Sid;
                  outgoingSession.setAttribute(CDR_SID, callRecord.getSid());
 
                  return true; // successfully proxied the SIP request between two registered clients
+             } else {
+                 if (numberOfRetry >= MAX_NUMBER_OF_RETRIES) {
+                     final SipServletResponse resp = request.createResponse(SC_NOT_FOUND, "Cannot complete P2P call");
+                     resp.send();
+                     return false;
+                 }
+
+                 DelayedCallManager.delayCallInvite(request, client, toClient, storage, sipFactory, patchForNat, numberOfRetry + 1);
+                 return true;
+
              }
          } catch (Exception e) {
              if (logger.isInfoEnabled()) {
@@ -201,8 +227,8 @@ import org.restcomm.connect.commons.dao.Sid;
 
      /**
       * @param request
-      * @param client
-      * @param toClient
+      * @param fromClient
+      * @param from
       * @throws IOException
       */
      // https://telestax.atlassian.net/browse/RESTCOMM-335
