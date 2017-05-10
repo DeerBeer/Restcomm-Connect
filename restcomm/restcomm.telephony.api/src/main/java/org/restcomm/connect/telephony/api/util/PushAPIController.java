@@ -20,7 +20,7 @@ import java.util.List;
 public class PushAPIController {
     private static final Logger logger = Logger.getLogger(PushAPIController.class);
 
-    private static String url = "http://localhost/3000/job/create";
+    private static String url = "http://localhost/3000/job/custom/create";
 
     public boolean sendPushRequest(String from, String to){
         try {
@@ -28,7 +28,8 @@ public class PushAPIController {
             HttpPost httpPost = new HttpPost(url);
 
             List<NameValuePair> params = new ArrayList<NameValuePair>();
-            params.add(new BasicNameValuePair("targets[0]", to));
+            params.add(new BasicNameValuePair("field", "username"));
+            params.add(new BasicNameValuePair("value", to));
             params.add(new BasicNameValuePair("type ", "0"));
             params.add(new BasicNameValuePair("message ", "{\"type\": \"call\", \"from\": \""+from+"\"}"));
 
