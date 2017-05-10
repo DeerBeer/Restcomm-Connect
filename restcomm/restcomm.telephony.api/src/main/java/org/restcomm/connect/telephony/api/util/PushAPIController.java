@@ -34,10 +34,10 @@ public class PushAPIController {
             params.add(new BasicNameValuePair("message ", "{\"type\": \"call\", \"from\": \""+from+"\"}"));
 
             httpPost.setEntity(new UrlEncodedFormEntity(params));
-
+            logger.info("Sending call push request to user \""+to+"\", from user \""+from+"\"");
             HttpResponse response = httpclient.execute(httpPost);
             httpPost.releaseConnection();
-            logger.info("Sending call push request to user \""+to+"\", from user \""+from+"\"");
+
             return response.getStatusLine().getStatusCode() == 201;
 
         } catch (ClientProtocolException e) {
