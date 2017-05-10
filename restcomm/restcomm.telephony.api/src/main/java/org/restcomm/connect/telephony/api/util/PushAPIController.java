@@ -20,7 +20,7 @@ import java.util.List;
 public class PushAPIController {
     private static final Logger logger = Logger.getLogger(PushAPIController.class);
 
-    private static String url = "http://localhost/3000/job/custom/create";
+    private static String url = "http://localhost:3000/job/custom/create";
 
     public boolean sendPushRequest(String from, String to){
         try {
@@ -37,7 +37,7 @@ public class PushAPIController {
 
             HttpResponse response = httpclient.execute(httpPost);
             httpPost.releaseConnection();
-
+            logger.info("Sending call push request to user \""+to+"\", from user \""+from+"\"");
             return response.getStatusLine().getStatusCode() == 201;
 
         } catch (ClientProtocolException e) {
