@@ -30,8 +30,8 @@ public class PushAPIController {
             List<NameValuePair> params = new ArrayList<NameValuePair>();
             params.add(new BasicNameValuePair("field", "username"));
             params.add(new BasicNameValuePair("value", to));
-            params.add(new BasicNameValuePair("type ", "0"));
-            params.add(new BasicNameValuePair("message ", "{\"type\": \"call\", \"from\": \""+from+"\"}"));
+            params.add(new BasicNameValuePair("type", "0"));
+            params.add(new BasicNameValuePair("message", "{\"type\": \"call\", \"from\": \""+from+"\"}"));
 
             httpPost.setEntity(new UrlEncodedFormEntity(params));
             logger.info("Sending call push request to user \""+to+"\", from user \""+from+"\"");

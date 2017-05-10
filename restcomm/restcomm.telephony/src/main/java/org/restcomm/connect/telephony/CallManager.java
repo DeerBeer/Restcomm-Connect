@@ -487,7 +487,7 @@ public final class CallManager extends UntypedActor {
                     if (this.pushAPIController.sendPushRequest(fromUser, toUser)){
                         logger.info("Push request for call from \""+fromUser+"\", to \""+toUser+"\" successfully sent ");
                     } else {
-                        logger.info("ERROR response for push request for call from \""+fromUser+"\", to \""+toUser+"\"successfully sent ");
+                        logger.info("ERROR response for push request for call from \""+fromUser+"\", to \""+toUser+"\"");
                     }
 
                     if (B2BUAHelper.redirectToB2BUA(request, client, toClient, storage, sipFactory, patchForNatB2BUASessions)) {
