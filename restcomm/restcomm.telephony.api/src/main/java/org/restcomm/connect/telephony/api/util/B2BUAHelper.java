@@ -72,7 +72,7 @@ import org.restcomm.connect.commons.dao.Sid;
      public static final String B2BUA_LAST_FINAL_RESPONSE = "lastFinalResponse";
      private static final String B2BUA_LINKED_SESSION = "linkedSession";
      private static final String CDR_SID = "callDetailRecord_sid";
-     private static final int MAX_NUMBER_OF_RETRIES = 5; //TODO move to configuration
+     private static final int MAX_NUMBER_OF_RETRIES = 10; //TODO move to configuration
 
      private static final Logger logger = Logger.getLogger(B2BUAHelper.class);
 
