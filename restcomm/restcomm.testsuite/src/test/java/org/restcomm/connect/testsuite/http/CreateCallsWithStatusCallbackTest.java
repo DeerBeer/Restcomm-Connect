@@ -2,7 +2,6 @@ package org.restcomm.connect.testsuite.http;
 
 import com.github.tomakehurst.wiremock.junit.WireMockRule;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import org.apache.log4j.Logger;
 import org.cafesip.sipunit.SipCall;
@@ -15,21 +14,23 @@ import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.jboss.shrinkwrap.resolver.api.maven.archive.ShrinkWrapMaven;
+import org.jboss.shrinkwrap.resolver.api.maven.Maven;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.FixMethodOrder;
+import org.junit.runners.MethodSorters;
+import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.restcomm.connect.commons.Version;
+import org.restcomm.connect.commons.annotations.FeatureAltTests;
+import org.restcomm.connect.commons.annotations.UnstableTests;
 import org.restcomm.connect.testsuite.tools.MonitoringServiceTool;
 
-import javax.sip.address.SipURI;
-import javax.sip.header.FromHeader;
 import javax.sip.message.Response;
 import java.net.URL;
-import java.text.ParseException;
 import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -37,7 +38,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.findAll;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
-import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
@@ -49,6 +49,8 @@ import static org.junit.Assert.assertTrue;
  * @author <a href="mailto:gvagenas@gmail.com">gvagenas</a>
  */
 @RunWith(Arquillian.class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
+@Category(FeatureAltTests.class)
 public class CreateCallsWithStatusCallbackTest {
 
     private final static Logger logger = Logger.getLogger(CreateCallsWithStatusCallbackTest.class.getName());
@@ -219,9 +221,9 @@ public class CreateCallsWithStatusCallbackTest {
         assertTrue(requestUrl.contains("SequenceNumber=3"));
         assertTrue(requestUrl.contains("CallStatus=completed"));
 
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
-        int liveIncomingCalls = MonitoringServiceTool.getInstance().getLiveIncomingCalls(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
-        int liveOutgoingCalls = MonitoringServiceTool.getInstance().getLiveOutgoingCalls(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
+        int liveIncomingCalls = MonitoringServiceTool.getInstance().getLiveIncomingCallStatistics(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
+        int liveOutgoingCalls = MonitoringServiceTool.getInstance().getLiveOutgoingCallStatistics(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
         assertTrue(liveCalls==0);
         assertTrue(liveIncomingCalls==0);
@@ -231,6 +233,7 @@ public class CreateCallsWithStatusCallbackTest {
 
     private String dialNumberWithStatusCallback = "<Response><Dial><Number statusCallback=\"http://127.0.0.1:8090/statusOfDialNumber\" statusCallbackMethod=\"GET\">+131313</Number></Dial></Response>";
     @Test
+    @Category(UnstableTests.class)
     public void createCallNumberWithStatusCallbackInBothTheRequestAndRCML() throws InterruptedException {
 
         stubFor(post(urlPathEqualTo("/1111"))
@@ -377,9 +380,9 @@ public class CreateCallsWithStatusCallbackTest {
         assertTrue(requestUrl.contains("SequenceNumber=3"));
         assertTrue(requestUrl.contains("CallStatus=completed"));
 
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
-        int liveIncomingCalls = MonitoringServiceTool.getInstance().getLiveIncomingCalls(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
-        int liveOutgoingCalls = MonitoringServiceTool.getInstance().getLiveOutgoingCalls(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
+        int liveIncomingCalls = MonitoringServiceTool.getInstance().getLiveIncomingCallStatistics(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
+        int liveOutgoingCalls = MonitoringServiceTool.getInstance().getLiveOutgoingCallStatistics(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(),adminAccountSid, adminAuthToken);
         assertTrue(liveCalls==0);
         assertTrue(liveIncomingCalls==0);
@@ -391,14 +394,16 @@ public class CreateCallsWithStatusCallbackTest {
     public static WebArchive createWebArchiveNoGw() {
         logger.info("Packaging Test App");
         WebArchive archive = ShrinkWrap.create(WebArchive.class, "restcomm.war");
-        final WebArchive restcommArchive = ShrinkWrapMaven.resolver()
+        final WebArchive restcommArchive = Maven.resolver()
                 .resolve("org.restcomm:restcomm-connect.application:war:" + version).withoutTransitivity()
                 .asSingle(WebArchive.class);
         archive = archive.merge(restcommArchive);
         archive.delete("/WEB-INF/sip.xml");
+archive.delete("/WEB-INF/web.xml");
         archive.delete("/WEB-INF/conf/restcomm.xml");
         archive.delete("/WEB-INF/data/hsql/restcomm.script");
         archive.addAsWebInfResource("sip.xml");
+        archive.addAsWebInfResource("web.xml");
         archive.addAsWebInfResource("restcomm.xml", "conf/restcomm.xml");
         archive.addAsWebInfResource("restcomm.script_dialStatusCallbackTest", "data/hsql/restcomm.script");
         archive.addAsWebInfResource("akka_application.conf", "classes/application.conf");

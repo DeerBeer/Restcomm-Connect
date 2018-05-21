@@ -27,6 +27,7 @@ import java.util.Map;
 
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
+import org.apache.log4j.Logger;
 import org.joda.time.DateTime;
 import org.restcomm.connect.dao.DaoUtils;
 import org.restcomm.connect.dao.IncomingPhoneNumbersDao;
@@ -34,15 +35,21 @@ import org.restcomm.connect.dao.entities.IncomingPhoneNumberFilter;
 import org.restcomm.connect.commons.dao.Sid;
 import org.restcomm.connect.commons.annotations.concurrency.ThreadSafe;
 import org.restcomm.connect.dao.entities.IncomingPhoneNumber;
+import org.restcomm.connect.dao.entities.SearchFilterMode;
 
 /**
  * @author quintana.thomas@gmail.com (Thomas Quintana)
  * @author jean.deruelle@telestax.com
+ * @author maria.farooq@telestax.com (Maria Farooq)
  */
 @ThreadSafe
 public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumbersDao {
     private static final String namespace = "org.mobicents.servlet.sip.restcomm.dao.IncomingPhoneNumbersDao.";
     private final SqlSessionFactory sessions;
+    private final Logger logger = Logger.getLogger(MybatisIncomingPhoneNumbersDao.class.getName());
+    private static final String ORG_SID = "organization_sid";
+    private static final String PHONE_NUM = "phone_number";
+
 
     public MybatisIncomingPhoneNumbersDao(final SqlSessionFactory sessions) {
         super();
@@ -62,18 +69,9 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
 
     @Override
     public IncomingPhoneNumber getIncomingPhoneNumber(final Sid sid) {
-        return getIncomingPhoneNumber("getIncomingPhoneNumber", sid.toString());
-    }
-
-    @Override
-    public IncomingPhoneNumber getIncomingPhoneNumber(final String phoneNumber) {
-        return getIncomingPhoneNumber("getIncomingPhoneNumberByValue", phoneNumber);
-    }
-
-    private IncomingPhoneNumber getIncomingPhoneNumber(final String selector, Object parameter) {
         final SqlSession session = sessions.openSession();
         try {
-            final Map<String, Object> result = session.selectOne(namespace + selector, parameter);
+            final Map<String, Object> result = session.selectOne(namespace + "getIncomingPhoneNumber", sid.toString());
             if (result != null) {
                 return toIncomingPhoneNumber(result);
             } else {
@@ -103,11 +101,11 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
     }
 
     @Override
-    public List<IncomingPhoneNumber> getAllIncomingPhoneNumbers() {
+    public List<IncomingPhoneNumber> getIncomingPhoneNumbersRegex(IncomingPhoneNumberFilter incomingPhoneNumberFilter) {
         final SqlSession session = sessions.openSession();
         try {
-            final List<Map<String, Object>> results = session.selectList(namespace + "getAllIncomingPhoneNumbers");
-            final List<IncomingPhoneNumber> incomingPhoneNumbers = new ArrayList<IncomingPhoneNumber>();
+            final List<Map<String, Object>> results = session.selectList(namespace + "getIncomingPhoneNumbersRegex", incomingPhoneNumberFilter);
+            final List<IncomingPhoneNumber> incomingPhoneNumbers = new ArrayList<IncomingPhoneNumber>(results.size());
             if (results != null && !results.isEmpty()) {
                 for (final Map<String, Object> result : results) {
                     incomingPhoneNumbers.add(toIncomingPhoneNumber(result));
@@ -119,13 +117,21 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
         }
     }
 
+
+
     @Override
     public List<IncomingPhoneNumber> getIncomingPhoneNumbersByFilter(IncomingPhoneNumberFilter filter) {
         final SqlSession session = sessions.openSession();
         try {
-            final List<Map<String, Object>> results = session.selectList(namespace + "getIncomingPhoneNumbersByFriendlyName",
+
+            String query = "getIncomingPhoneNumbersByFriendlyName";
+            if (filter.getFilterMode().equals(SearchFilterMode.WILDCARD_MATCH)) {
+                query = "searchNumbersWithWildcardMode";
+            }
+
+            final List<Map<String, Object>> results = session.selectList(namespace + query,
                     filter);
-            final List<IncomingPhoneNumber> incomingPhoneNumbers = new ArrayList<IncomingPhoneNumber>();
+            final List<IncomingPhoneNumber> incomingPhoneNumbers = new ArrayList<IncomingPhoneNumber>(results.size());
             if (results != null && !results.isEmpty()) {
                 for (final Map<String, Object> result : results) {
                     incomingPhoneNumbers.add(toIncomingPhoneNumber(result));
@@ -168,13 +174,22 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
         }
     }
 
+    @Override
+    public Integer getTotalIncomingPhoneNumbers(IncomingPhoneNumberFilter filter) {
+
+        try (final SqlSession session = sessions.openSession();) {
+            final Integer total = session.selectOne(namespace + "getTotalIncomingPhoneNumbersByUsingFilters", filter);
+            return total;
+        }
+    }
+
     private IncomingPhoneNumber toIncomingPhoneNumber(final Map<String, Object> map) {
         final Sid sid = DaoUtils.readSid(map.get("sid"));
         final DateTime dateCreated = DaoUtils.readDateTime(map.get("date_created"));
         final DateTime dateUpdated = DaoUtils.readDateTime(map.get("date_updated"));
         final String friendlyName = DaoUtils.readString(map.get("friendly_name"));
         final Sid accountSid = DaoUtils.readSid(map.get("account_sid"));
-        final String phoneNumber = DaoUtils.readString(map.get("phone_number"));
+        final String phoneNumber = DaoUtils.readString(map.get(PHONE_NUM));
         final String apiVersion = DaoUtils.readString(map.get("api_version"));
         final Boolean hasVoiceCallerIdLookup = DaoUtils.readBoolean(map.get("voice_caller_id_lookup"));
         final URI voiceUrl = DaoUtils.readUri(map.get("voice_url"));
@@ -198,6 +213,7 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
         final URI referUrl = DaoUtils.readUri(map.get("refer_url"));
         final String referMethod = DaoUtils.readString(map.get("refer_method"));
         final Sid referApplicationSid = DaoUtils.readSid(map.get("refer_application_sid"));
+        final Sid organizationSid = DaoUtils.readSid(map.get(ORG_SID));
 
 
         final Boolean voiceCapable = DaoUtils.readBoolean(map.get("voice_capable"));
@@ -217,7 +233,7 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
                 statusCallbackMethod, voiceApplicationSid, smsUrl, smsMethod, smsFallbackUrl, smsFallbackMethod,
                 smsApplicationSid, uri, ussdUrl, ussdMethod, ussdFallbackUrl, ussdFallbackMethod, ussdApplicationSid,
                 referUrl, referMethod, referApplicationSid,
-                voiceCapable, smsCapable, mmsCapable, faxCapable, pureSip, voiceApplicationName, smsApplicationName, ussdApplicationName, referApplicationName);
+                voiceCapable, smsCapable, mmsCapable, faxCapable, pureSip, voiceApplicationName, smsApplicationName, ussdApplicationName, referApplicationName, organizationSid);
     }
 
     private Map<String, Object> toMap(final IncomingPhoneNumber incomingPhoneNumber) {
@@ -227,7 +243,7 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
         map.put("date_updated", DaoUtils.writeDateTime(incomingPhoneNumber.getDateUpdated()));
         map.put("friendly_name", incomingPhoneNumber.getFriendlyName());
         map.put("account_sid", DaoUtils.writeSid(incomingPhoneNumber.getAccountSid()));
-        map.put("phone_number", incomingPhoneNumber.getPhoneNumber());
+        map.put(PHONE_NUM, incomingPhoneNumber.getPhoneNumber());
         map.put("api_version", incomingPhoneNumber.getApiVersion());
         map.put("voice_caller_id_lookup", incomingPhoneNumber.hasVoiceCallerIdLookup());
         map.put("voice_url", DaoUtils.writeUri(incomingPhoneNumber.getVoiceUrl()));
@@ -257,6 +273,8 @@ public final class MybatisIncomingPhoneNumbersDao implements IncomingPhoneNumber
         map.put("fax_capable", incomingPhoneNumber.isFaxCapable());
         map.put("pure_sip", incomingPhoneNumber.isPureSip());
         map.put("cost", incomingPhoneNumber.getCost());
+        map.put(ORG_SID, DaoUtils.writeSid(incomingPhoneNumber.getOrganizationSid()));
         return map;
     }
+
 }

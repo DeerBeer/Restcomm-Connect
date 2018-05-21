@@ -21,13 +21,14 @@ package org.restcomm.connect.dao;
 
 import java.util.List;
 
+import org.restcomm.connect.commons.dao.Sid;
 import org.restcomm.connect.dao.entities.IncomingPhoneNumber;
 import org.restcomm.connect.dao.entities.IncomingPhoneNumberFilter;
-import org.restcomm.connect.commons.dao.Sid;
 
 /**
  * @author quintana.thomas@gmail.com (Thomas Quintana)
  * @author jean.deruelle@telestax.com
+ * @author maria.farooq@telestax.com (Maria Farooq)
  */
 public interface IncomingPhoneNumbersDao {
     void addIncomingPhoneNumber(IncomingPhoneNumber incomingPhoneNumber);
@@ -38,13 +39,13 @@ public interface IncomingPhoneNumbersDao {
 
     List<IncomingPhoneNumber> getIncomingPhoneNumbersByFilter(IncomingPhoneNumberFilter incomingPhoneNumberFilter);
 
-    IncomingPhoneNumber getIncomingPhoneNumber(String phoneNumber);
-
     void removeIncomingPhoneNumber(Sid sid);
 
     void removeIncomingPhoneNumbers(Sid accountSid);
 
     void updateIncomingPhoneNumber(IncomingPhoneNumber incomingPhoneNumber);
 
-    List<IncomingPhoneNumber> getAllIncomingPhoneNumbers();
+    List<IncomingPhoneNumber> getIncomingPhoneNumbersRegex(IncomingPhoneNumberFilter incomingPhoneNumberFilter);
+
+    Integer getTotalIncomingPhoneNumbers(IncomingPhoneNumberFilter filter);
 }

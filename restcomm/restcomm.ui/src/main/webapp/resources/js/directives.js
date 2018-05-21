@@ -28,39 +28,99 @@ rcDirectives.directive('passwordMatch', [function () {
   };
 }]);
 
-rcDirectives.directive('rcPageTitle', function() {
+rcDirectives.directive('autofocus', function ($timeout) {
   return {
-    restrict: 'E',
+    restrict: 'A',
+    link: function (scope, element, attrs) {
+      scope.$watch(attrs.autofocus, function (newValue) {
+        $timeout(function () {
+          if (attrs.autofocus === '' || newValue) {
+            element[0].focus();
+            if (element[0].select) {
+              element[0].select();
+            }
+          }
+        }, 25);
+      });
+    }
+  };
+});
+
+rcDirectives.directive('rcFac', function ($interpolate, $compile, $parse) {
+  return {
+    link: function(scope, element, attrs) {
+      var facObject = scope.$eval(attrs.rcFac);
+
+      var facCondition = (facObject && facObject.condition) || attrs.facCondition;
+      var facTitle = attrs.facTitle || facObject.title;
+      var facMessage = attrs.facMessage || facObject.message;
+      var facAutoOpen = !!facObject.open;
+      var facWrapper = !!facObject.wrapper;
+      var facPlacement = facObject.placement || 'auto';
+      var facStyles = facObject.styles;
+
+      var disabled = $parse(facCondition)(scope);
+      element.prop('disabled', disabled);
+
+      if ((disabled || facAutoOpen) && !attrs.title) {
+        element.prop('title', facTitle);
+        element.css({'pointer-events': 'none'});
+
+        var wrapper = facWrapper ? element.wrap('<div></div>').parent() : element;
+
+        if (facStyles) {
+          wrapper.css(facStyles);
+        }
+        wrapper.attr('popover-title', facTitle);
+        wrapper.attr('uib-popover-html', '\'' + facMessage + '\'');
+        wrapper.attr('popover-placement', facPlacement);
+        wrapper.attr('popover-append-to-body', 'true');
+
+        if (facAutoOpen) {
+          wrapper.attr('popover-is-open', facCondition);
+        }
+        else {
+          wrapper.attr('popover-trigger', '"mouseenter"');
+          wrapper.css({'cursor': 'not-allowed'});
+          wrapper.attr('popover-popup-close-delay', '2500');
+        }
+        $compile(wrapper)(scope);
+        $compile(element)(scope);
+      }
+    }
+  }
+});
+
+rcDirectives.directive('rcListSort', function ($timeout) {
+  return {
+    restrict: 'A',
+    transclude: true,
+    template :
+    '<span class="clickable" ng-click="sortColumn()"><ng-transclude></ng-transclude>' +
+    '  <i class="rc-list-sort-icon fa {{ reverse ? \'fa-chevron-down\' : \'fa-chevron-up\' }}" ng-show="showSort()"></i></span>',
     scope: {
-      icon: '@',
-      title: '@',
-      subTitle: '@'
+      order: '=',
+      by: '=',
+      reverse : '=',
+      update : '&'
     },
-    templateUrl: 'templates/rc-pagetitle.html'
-  };
-});
+    link: function(scope, element, attrs) {
+      scope.sortColumn = function () {
+        if( scope.order === scope.by ) {
+          scope.reverse = !!!scope.reverse
+        } else {
+          scope.by = scope.order ;
+          scope.reverse = false;
+        }
+        $timeout(function () {
+          scope.update && scope.update();
+        }, 0);
+      };
 
-rcDirectives.directive('rcNumbersPills', function() {
-  return {
-    restrict: 'E',
-    templateUrl: 'templates/rc-numbers-pills.html'
-  };
-});
-
-rcDirectives.directive('rcLogsPills', function() {
-  return {
-    restrict: 'E',
-    templateUrl: 'templates/rc-logs-pills.html'
-  };
-});
-
-rcDirectives.directive('rcListFilter', function() {
-  return {
-    restrict: 'E',
-    scope: {
-      filter: '='
-    },
-    templateUrl: 'templates/rc-list-filter.html'
+      scope.showSort = function () {
+        return attrs.order === ('\'' + scope.by + '\'');
+      };
+    }
   };
 });
 
@@ -79,9 +139,6 @@ rcDirectives.directive('rcEndpointUrl', function() {
     controller: function ($scope) {
         $scope.appNameVar = "";
         $scope.setApp = function() {
-            if ($scope.appNameVar === 'create_new_project') {
-                window.open('/restcomm-rvd');
-            } else
             // if this is an application SID, populate the sidVar
             if ($scope.appNameVar && $scope.appNameVar.substr(0,2) == "AP") {
                 $scope.sidVar = $scope.appNameVar;
@@ -142,4 +199,3 @@ rcDirectives.directive('rcEndpointUrl', function() {
     templateUrl: 'templates/rc-endpoint-url.html'
   };
 });
-

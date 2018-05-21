@@ -59,6 +59,7 @@ public class ClientConverter extends AbstractConverter implements JsonSerializer
         writeFriendlyName(client.getFriendlyName(), writer);
         writeLogin(client.getLogin(), writer);
         writePassword(client.getPassword(), writer);
+        writePasswordAlgorithm(client.getPasswordAlgorithm(), writer);
         writeStatus(client.getStatus().toString(), writer);
         writeVoiceUrl(client.getVoiceUrl(), writer);
         writeVoiceMethod(client.getVoiceMethod(), writer);
@@ -66,6 +67,7 @@ public class ClientConverter extends AbstractConverter implements JsonSerializer
         writeVoiceFallbackMethod(client.getVoiceFallbackMethod(), writer);
         writeVoiceApplicationSid(client.getVoiceApplicationSid(), writer);
         writeUri(client.getUri(), writer);
+        writePushClientIdentity(client.getPushClientIdentity(), writer);
         writer.endNode();
     }
 
@@ -80,6 +82,7 @@ public class ClientConverter extends AbstractConverter implements JsonSerializer
         writeFriendlyName(client.getFriendlyName(), object);
         writeLogin(client.getLogin(), object);
         writePassword(client.getPassword(), object);
+        writePasswordAlgorithm(client.getPasswordAlgorithm(), object);
         writeStatus(client.getStatus().toString(), object);
         writeVoiceUrl(client.getVoiceUrl(), object);
         writeVoiceMethod(client.getVoiceMethod(), object);
@@ -87,6 +90,7 @@ public class ClientConverter extends AbstractConverter implements JsonSerializer
         writeVoiceFallbackMethod(client.getVoiceFallbackMethod(), object);
         writeVoiceApplicationSid(client.getVoiceApplicationSid(), object);
         writeUri(client.getUri(), object);
+        writePushClientIdentity(client.getPushClientIdentity(), object);
         return object;
     }
 
@@ -106,7 +110,17 @@ public class ClientConverter extends AbstractConverter implements JsonSerializer
         writer.endNode();
     }
 
+    protected void writePasswordAlgorithm(final String password_algorithm, final HierarchicalStreamWriter writer) {
+        writer.startNode("Password_Algorithm");
+        writer.setValue(password_algorithm);
+        writer.endNode();
+    }
+
     protected void writePassword(final String password, final JsonObject object) {
         object.addProperty("password", password);
+    }
+
+    protected void writePasswordAlgorithm(final String password_algorithm, final JsonObject object) {
+        object.addProperty("password_algorithm", password_algorithm);
     }
 }

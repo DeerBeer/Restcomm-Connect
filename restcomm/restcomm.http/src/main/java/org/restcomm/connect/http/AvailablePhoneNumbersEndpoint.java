@@ -21,7 +21,19 @@ package org.restcomm.connect.http;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.sun.jersey.spi.resource.Singleton;
 import com.thoughtworks.xstream.XStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+import javax.annotation.PostConstruct;
+import javax.servlet.ServletContext;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import static javax.ws.rs.core.Response.Status.INTERNAL_SERVER_ERROR;
+import static javax.ws.rs.core.Response.ok;
+import static javax.ws.rs.core.Response.status;
 import org.apache.commons.configuration.Configuration;
 import org.restcomm.connect.commons.annotations.concurrency.ThreadSafe;
 import org.restcomm.connect.commons.loader.ObjectInstantiationException;
@@ -31,35 +43,27 @@ import org.restcomm.connect.dao.entities.RestCommResponse;
 import org.restcomm.connect.http.converter.AvailablePhoneNumberConverter;
 import org.restcomm.connect.http.converter.AvailablePhoneNumberListConverter;
 import org.restcomm.connect.http.converter.RestCommResponseConverter;
+import org.restcomm.connect.identity.UserIdentityContext;
 import org.restcomm.connect.provisioning.number.api.PhoneNumber;
 import org.restcomm.connect.provisioning.number.api.PhoneNumberProvisioningManager;
 import org.restcomm.connect.provisioning.number.api.PhoneNumberProvisioningManagerProvider;
 import org.restcomm.connect.provisioning.number.api.PhoneNumberSearchFilters;
-
-import javax.annotation.PostConstruct;
-import javax.servlet.ServletContext;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Pattern;
-
-import static javax.ws.rs.core.Response.Status.INTERNAL_SERVER_ERROR;
-import static javax.ws.rs.core.Response.ok;
-import static javax.ws.rs.core.Response.status;
 
 /**
  * @author quintana.thomas@gmail.com (Thomas Quintana)
  * @author jean.deruelle@telestax.com
  */
 @ThreadSafe
-public abstract class AvailablePhoneNumbersEndpoint extends SecuredEndpoint {
+@Singleton
+public class AvailablePhoneNumbersEndpoint extends AbstractEndpoint {
     @Context
-    protected ServletContext context;
-    protected PhoneNumberProvisioningManager phoneNumberProvisioningManager;
+    private ServletContext context;
+    private PhoneNumberProvisioningManager phoneNumberProvisioningManager;
     private XStream xstream;
-    protected Gson gson;
+    private Gson gson;
+
+
+
 
     public AvailablePhoneNumbersEndpoint() {
         super();
@@ -69,7 +73,6 @@ public abstract class AvailablePhoneNumbersEndpoint extends SecuredEndpoint {
     public void init() throws ObjectInstantiationException {
         configuration = (Configuration) context.getAttribute(Configuration.class.getName());
         super.init(configuration.subset("runtime-settings"));
-
         /*
         phoneNumberProvisioningManager = (PhoneNumberProvisioningManager) context.getAttribute("PhoneNumberProvisioningManager");
         if(phoneNumberProvisioningManager == null) {
@@ -99,8 +102,14 @@ public abstract class AvailablePhoneNumbersEndpoint extends SecuredEndpoint {
         gson = builder.create();
     }
 
-    protected Response getAvailablePhoneNumbers(final String accountSid, final String isoCountryCode, PhoneNumberSearchFilters listFilters, String filterPattern, final MediaType responseType) {
-        secure(accountsDao.getAccount(accountSid), "RestComm:Read:AvailablePhoneNumbers");
+    protected Response getAvailablePhoneNumbers(final String accountSid,
+            final String isoCountryCode,
+            PhoneNumberSearchFilters listFilters,
+            String filterPattern,
+            final MediaType responseType,
+            UserIdentityContext userIdentityContext) {
+        permissionEvaluator.secure(accountsDao.getAccount(accountSid),
+                "RestComm:Read:AvailablePhoneNumbers", userIdentityContext);
         String searchPattern = "";
         if (filterPattern != null && !filterPattern.isEmpty()) {
             for(int i = 0; i < filterPattern.length(); i ++) {
@@ -123,10 +132,10 @@ public abstract class AvailablePhoneNumbersEndpoint extends SecuredEndpoint {
 
         final List<PhoneNumber> phoneNumbers = phoneNumberProvisioningManager.searchForNumbers(isoCountryCode, listFilters);
         List<AvailablePhoneNumber> availablePhoneNumbers = toAvailablePhoneNumbers(phoneNumbers);
-        if (MediaType.APPLICATION_XML_TYPE == responseType) {
+        if (MediaType.APPLICATION_XML_TYPE.equals(responseType)) {
             return ok(xstream.toXML(new RestCommResponse(new AvailablePhoneNumberList(availablePhoneNumbers))),
                     MediaType.APPLICATION_XML).build();
-        } else if (MediaType.APPLICATION_JSON_TYPE == responseType) {
+        } else if (MediaType.APPLICATION_JSON_TYPE.equals(responseType)) {
             return ok(gson.toJson(phoneNumbers), MediaType.APPLICATION_JSON).build();
         }
         return status(INTERNAL_SERVER_ERROR).build();

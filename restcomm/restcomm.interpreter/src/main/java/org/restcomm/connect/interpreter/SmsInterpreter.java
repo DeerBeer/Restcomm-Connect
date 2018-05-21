@@ -21,7 +21,6 @@ package org.restcomm.connect.interpreter;
 
 import akka.actor.Actor;
 import akka.actor.ActorRef;
-import akka.actor.ActorSystem;
 import akka.actor.Props;
 import akka.actor.UntypedActor;
 import akka.actor.UntypedActorContext;
@@ -40,6 +39,7 @@ import org.apache.http.client.ClientProtocolException;
 import org.apache.http.message.BasicNameValuePair;
 import org.joda.time.DateTime;
 import org.restcomm.connect.commons.dao.Sid;
+import org.restcomm.connect.commons.faulttolerance.RestcommUntypedActor;
 import org.restcomm.connect.commons.fsm.Action;
 import org.restcomm.connect.commons.fsm.FiniteStateMachine;
 import org.restcomm.connect.commons.fsm.State;
@@ -56,6 +56,11 @@ import org.restcomm.connect.email.EmailService;
 import org.restcomm.connect.email.api.EmailRequest;
 import org.restcomm.connect.email.api.EmailResponse;
 import org.restcomm.connect.email.api.Mail;
+import org.restcomm.connect.extension.api.ExtensionResponse;
+import org.restcomm.connect.extension.api.ExtensionType;
+import org.restcomm.connect.extension.api.IExtensionFeatureAccessRequest;
+import org.restcomm.connect.extension.api.RestcommExtensionGeneric;
+import org.restcomm.connect.extension.controller.ExtensionController;
 import org.restcomm.connect.http.client.Downloader;
 import org.restcomm.connect.http.client.DownloaderResponse;
 import org.restcomm.connect.http.client.HttpRequestDescriptor;
@@ -74,6 +79,7 @@ import org.restcomm.connect.sms.api.SmsSessionAttribute;
 import org.restcomm.connect.sms.api.SmsSessionInfo;
 import org.restcomm.connect.sms.api.SmsSessionRequest;
 import org.restcomm.connect.sms.api.SmsSessionResponse;
+import org.restcomm.connect.telephony.api.FeatureAccessRequest;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -92,14 +98,13 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * @author quintana.thomas@gmail.com (Thomas Quintana)
  */
-public final class SmsInterpreter extends UntypedActor {
+public final class SmsInterpreter extends RestcommUntypedActor {
     private static final int ERROR_NOTIFICATION = 0;
     private static final int WARNING_NOTIFICATION = 1;
     static String EMAIL_SENDER;
     // Logger
     private final LoggingAdapter logger = Logging.getLogger(getContext().system(), this);
 
-    private final ActorSystem system;
     // States for the FSM.
     private final State uninitialized;
     private final State acquiringLastSmsRequest;
@@ -149,12 +154,12 @@ public final class SmsInterpreter extends UntypedActor {
     private ConcurrentHashMap<String, String> customHttpHeaderMap = new ConcurrentHashMap<String, String>();
     private ConcurrentHashMap<String, String> customRequestHeaderMap;
 
-    public SmsInterpreter(final ActorRef service, final Configuration configuration, final DaoManager storage,
-            final Sid accountId, final String version, final URI url, final String method, final URI fallbackUrl,
-            final String fallbackMethod) {
+    //List of extensions for SmsInterpreter
+    List<RestcommExtensionGeneric> extensions;
+
+    public SmsInterpreter (final SmsInterpreterParams params) {
         super();
         final ActorRef source = self();
-        this.system = context().system();
         uninitialized = new State("uninitialized", null, null);
         acquiringLastSmsRequest = new State("acquiring last sms event", new AcquiringLastSmsEvent(source), null);
         downloadingRcml = new State("downloading rcml", new DownloadingRcml(source), null);
@@ -210,48 +215,58 @@ public final class SmsInterpreter extends UntypedActor {
         // Initialize the FSM.
         this.fsm = new FiniteStateMachine(uninitialized, transitions);
         // Initialize the runtime stuff.
-        this.service = service;
+        this.service = params.getSmsService();
         this.downloader = downloader();
-        this.storage = storage;
-        this.emailconfiguration = configuration.subset("smtp-service");
-        this.runtime = configuration.subset("runtime-settings");
-        this.configuration = configuration.subset("sms-aggregator");
-        this.accountId = accountId;
-        this.version = version;
-        this.url = url;
-        this.method = method;
-        this.fallbackUrl = fallbackUrl;
-        this.fallbackMethod = fallbackMethod;
+        this.storage = params.getStorage();
+        this.emailconfiguration = params.getConfiguration().subset("smtp-service");
+        this.runtime = params.getConfiguration().subset("runtime-settings");
+        this.configuration = params.getConfiguration().subset("sms-aggregator");
+        this.accountId = params.getAccountId();
+        this.version = params.getVersion();
+        this.url = params.getUrl();
+        this.method = params.getMethod();
+        this.fallbackUrl = params.getFallbackUrl();
+        this.fallbackMethod = params.getFallbackMethod();
         this.sessions = new HashMap<Sid, ActorRef>();
         this.normalizeNumber = runtime.getBoolean("normalize-numbers-for-outbound-calls");
+        extensions = ExtensionController.getInstance().getExtensions(ExtensionType.FeatureAccessControl);
     }
 
-    private ActorRef downloader() {
+    public static Props props (final SmsInterpreterParams params) {
+        return new Props(new UntypedActorFactory() {
+            @Override
+            public Actor create () throws Exception {
+                return new SmsInterpreter(params);
+            }
+        });
+    }
+
+    private ActorRef downloader () {
         final Props props = new Props(new UntypedActorFactory() {
             private static final long serialVersionUID = 1L;
 
             @Override
-            public UntypedActor create() throws Exception {
+            public UntypedActor create () throws Exception {
                 return new Downloader();
             }
         });
-        return system.actorOf(props);
+        return getContext().actorOf(props);
     }
 
-    ActorRef mailer(final Configuration configuration) {
+    ActorRef mailer (final Configuration configuration) {
         final Props props = new Props(new UntypedActorFactory() {
             private static final long serialVersionUID = 1L;
 
             @Override
-            public Actor create() throws Exception {
+            public Actor create () throws Exception {
                 return new EmailService(configuration);
             }
         });
-        return system.actorOf(props);
+        return getContext().actorOf(props);
     }
 
-    protected String format(final String number) {
-        if(normalizeNumber) {
+    protected String format (final String number) {
+        if (normalizeNumber) {
             final PhoneNumberUtil numbersUtil = PhoneNumberUtil.getInstance();
             try {
                 final PhoneNumber result = numbersUtil.parse(number, "US");
@@ -264,7 +279,7 @@ public final class SmsInterpreter extends UntypedActor {
         }
     }
 
-    protected void invalidVerb(final Tag verb) {
+    protected void invalidVerb (final Tag verb) {
         final ActorRef self = self();
         final Notification notification = notification(WARNING_NOTIFICATION, 14110, "Invalid Verb for SMS Reply");
         final NotificationsDao notifications = storage.getNotificationsDao();
@@ -274,7 +289,7 @@ public final class SmsInterpreter extends UntypedActor {
         parser.tell(next, self);
     }
 
-    protected Notification notification(final int log, final int error, final String message) {
+    protected Notification notification (final int log, final int error, final String message) {
         final Notification.Builder builder = Notification.builder();
         final Sid sid = Sid.generate(Sid.Type.NOTIFICATION);
         builder.setSid(sid);
@@ -323,13 +338,13 @@ public final class SmsInterpreter extends UntypedActor {
 
     @SuppressWarnings("unchecked")
     @Override
-    public void onReceive(final Object message) throws Exception {
+    public void onReceive (final Object message) throws Exception {
         final Class<?> klass = message.getClass();
         final State state = fsm.state();
         if (StartInterpreter.class.equals(klass)) {
             fsm.transition(message, acquiringLastSmsRequest);
         } else if (SmsSessionRequest.class.equals(klass)) {
-            customRequestHeaderMap = ((SmsSessionRequest)message).headers();
+            customRequestHeaderMap = ((SmsSessionRequest) message).headers();
             fsm.transition(message, downloadingRcml);
         } else if (DownloaderResponse.class.equals(klass)) {
             final DownloaderResponse response = (DownloaderResponse) message;
@@ -363,8 +378,8 @@ public final class SmsInterpreter extends UntypedActor {
                     }
                 }
             }
-        }  else if (ParserFailed.class.equals(klass)) {
-            if(logger.isInfoEnabled()) {
+        } else if (ParserFailed.class.equals(klass)) {
+            if (logger.isInfoEnabled()) {
                 logger.info("ParserFailed received. Will stop the call");
             }
             fsm.transition(message, finished);
@@ -373,7 +388,26 @@ public final class SmsInterpreter extends UntypedActor {
             if (Verbs.redirect.equals(verb.name())) {
                 fsm.transition(message, redirecting);
             } else if (Verbs.sms.equals(verb.name())) {
-                fsm.transition(message, creatingSmsSession);
+                //Check if Outbound SMS is allowed
+                ExtensionController ec = ExtensionController.getInstance();
+                final IExtensionFeatureAccessRequest far = new FeatureAccessRequest(FeatureAccessRequest.Feature.OUTBOUND_SMS, accountId);
+                ExtensionResponse er = ec.executePreOutboundAction(far, this.extensions);
+
+                if (er.isAllowed()) {
+                    fsm.transition(message, creatingSmsSession);
+                    ec.executePostOutboundAction(far, extensions);
+                } else {
+                    if (logger.isDebugEnabled()) {
+                        final String errMsg = "Outbound SMS is not Allowed";
+                        logger.debug(errMsg);
+                    }
+                    final NotificationsDao notifications = storage.getNotificationsDao();
+                    final Notification notification = notification(WARNING_NOTIFICATION, 11001, "Outbound SMS is now allowed");
+                    notifications.addNotification(notification);
+                    fsm.transition(message, finished);
+                    ec.executePostOutboundAction(far, extensions);
+                    return;
+                }
             } else if (Verbs.email.equals(verb.name())) {
                 fsm.transition(message, sendingEmail);
             } else {
@@ -444,7 +478,7 @@ public final class SmsInterpreter extends UntypedActor {
                 return new Parser(xml, self());
             }
         });
-        return system.actorOf(props);
+        return getContext().actorOf(props);
     }
 
     private void response(final Object message) {
@@ -454,13 +488,6 @@ public final class SmsInterpreter extends UntypedActor {
             final SmsSessionResponse response = (SmsSessionResponse) message;
             final SmsSessionInfo info = response.info();
             SmsMessage record = (SmsMessage) info.attributes().get("record");
-            if (response.succeeded()) {
-                final DateTime now = DateTime.now();
-                record = record.setDateSent(now);
-                record = record.setStatus(Status.SENT);
-            } else {
-                record = record.setStatus(Status.FAILED);
-            }
             final SmsMessagesDao messages = storage.getSmsMessagesDao();
             messages.updateSmsMessage(record);
             // Notify the callback listener.
@@ -549,6 +576,7 @@ public final class SmsInterpreter extends UntypedActor {
             final SmsMessage record = builder.build();
             final SmsMessagesDao messages = storage.getSmsMessagesDao();
             messages.addSmsMessage(record);
+            getContext().system().eventStream().publish(record);
             // Destroy the initial session.
             service.tell(new DestroySmsSession(initialSession), source);
             initialSession = null;
@@ -778,7 +806,7 @@ public final class SmsInterpreter extends UntypedActor {
                 // Start observing events from the sms session.
                 session.tell(new Observe(source), source);
                 // Store the status callback in the sms session.
-                attribute = verb.attribute("viStatusCallback");
+                attribute = verb.attribute("statusCallback");
                 if (attribute != null) {
                     String callback = attribute.value();
                     if (callback != null && !callback.isEmpty()) {

@@ -19,13 +19,17 @@
  */
 package org.restcomm.connect.telephony.proxy;
 
-import static javax.servlet.sip.SipServlet.OUTBOUND_INTERFACES;
-import static javax.servlet.sip.SipServletResponse.SC_OK;
-import static javax.servlet.sip.SipServletResponse.SC_PROXY_AUTHENTICATION_REQUIRED;
-import static javax.servlet.sip.SipServletResponse.SC_UNAUTHORIZED;
-
-import java.util.List;
-import java.util.concurrent.TimeUnit;
+import akka.actor.ActorContext;
+import akka.actor.ReceiveTimeout;
+import akka.event.Logging;
+import akka.event.LoggingAdapter;
+import org.joda.time.DateTime;
+import org.restcomm.connect.commons.faulttolerance.RestcommUntypedActor;
+import org.restcomm.connect.dao.DaoManager;
+import org.restcomm.connect.dao.GatewaysDao;
+import org.restcomm.connect.dao.entities.Gateway;
+import org.restcomm.connect.telephony.api.RegisterGateway;
+import scala.concurrent.duration.Duration;
 
 import javax.servlet.ServletContext;
 import javax.servlet.sip.Address;
@@ -37,25 +41,18 @@ import javax.servlet.sip.SipServletRequest;
 import javax.servlet.sip.SipServletResponse;
 import javax.servlet.sip.SipSession;
 import javax.servlet.sip.SipURI;
+import javax.sip.header.ContactHeader;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
-import org.joda.time.DateTime;
-import org.restcomm.connect.dao.DaoManager;
-import org.restcomm.connect.dao.GatewaysDao;
-import org.restcomm.connect.dao.entities.Gateway;
-import org.restcomm.connect.telephony.api.RegisterGateway;
-
-import scala.concurrent.duration.Duration;
-import akka.actor.ActorContext;
-import akka.actor.ReceiveTimeout;
-import akka.actor.UntypedActor;
-import akka.event.Logging;
-import akka.event.LoggingAdapter;
+import static javax.servlet.sip.SipServlet.OUTBOUND_INTERFACES;
+import static javax.servlet.sip.SipServletResponse.*;
 
 /**
  * @author quintana.thomas@gmail.com (Thomas Quintana)
  * @author gvagenas@gmail.com
  */
-public final class ProxyManager extends UntypedActor {
+public final class ProxyManager extends RestcommUntypedActor {
     private final LoggingAdapter logger = Logging.getLogger(getContext().system(), this);
 
     private static final int ttl = 1800;
@@ -112,8 +109,14 @@ public final class ProxyManager extends UntypedActor {
         if (port == -1) {
             port = outboundInterface().getPort();
         }
+        // github#2519, If the user already has hort part, remove it in Contact
+        String contactUser = user;
+        if (contactUser.contains("@")) {
+            int index = contactUser.indexOf("@");
+            contactUser = contactUser.substring(0, index);
+        }
         final StringBuilder buffer = new StringBuilder();
-        buffer.append("sip:").append(user).append("@").append(host).append(":").append(port);
+        buffer.append("sip:").append(contactUser).append("@").append(host).append(":").append(port);
         final Address contact = factory.createAddress(buffer.toString());
         contact.setExpires(expires);
         return contact;
@@ -206,9 +209,15 @@ public final class ProxyManager extends UntypedActor {
             final String user = gateway.getUserName();
             final String proxy = gateway.getProxy();
             final StringBuilder buffer = new StringBuilder();
-            buffer.append("sip:").append(user).append("@").append(proxy);
+            // github#2519, If the user already has hort part, we dont need to add RC address
+            if (user.contains("@")) {
+                buffer.append("sip:").append(user);
+            } else {
+                buffer.append("sip:").append(user).append("@").append(proxy);
+            }
             final String aor = buffer.toString();
-            final int expires = (gateway.getTimeToLive() > 0 && gateway.getTimeToLive() < 3600) ? gateway.getTimeToLive() : ttl;
+            // Set maximum expire time to 3600s
+            final int expires = (gateway.getTimeToLive() > 0 && gateway.getTimeToLive() <= 3600) ? gateway.getTimeToLive() : ttl;
             final Address contact = contact(gateway, expires);
             // Issue http://code.google.com/p/restcomm/issues/detail?id=65
             SipServletRequest register = null;
@@ -216,12 +225,15 @@ public final class ProxyManager extends UntypedActor {
                 final String method = response.getRequest().getMethod();
                 register = response.getSession().createRequest(method);
             } else {
-                register = factory.createRequest(application, "REGISTER", contact.toString(), aor);
+                register = factory.createRequest(application, "REGISTER", aor, aor);
             }
             if (authentication != null && response != null) {
                 register.addAuthHeader(response, authentication);
             }
-            register.addAddressHeader("Contact", contact, false);
+            // If contact header is already in, dont add it any more.
+            if (register.getHeader(ContactHeader.NAME) == null) {
+                register.addAddressHeader("Contact", contact, false);
+            }
             final SipURI uri = factory.createSipURI(null, proxy);
             register.pushRoute(uri);
             register.setRequestURI(uri);

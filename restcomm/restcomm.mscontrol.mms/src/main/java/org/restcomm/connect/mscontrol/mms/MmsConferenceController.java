@@ -21,11 +21,10 @@
 
 package org.restcomm.connect.mscontrol.mms;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
+import akka.actor.ActorRef;
+import akka.event.Logging;
+import akka.event.LoggingAdapter;
+import jain.protocol.ip.mgcp.message.parms.ConnectionMode;
 import org.mobicents.servlet.restcomm.mscontrol.messages.MediaServerConferenceControllerStateChanged;
 import org.restcomm.connect.commons.annotations.concurrency.Immutable;
 import org.restcomm.connect.commons.dao.Sid;
@@ -62,10 +61,10 @@ import org.restcomm.connect.mscontrol.api.messages.Stop;
 import org.restcomm.connect.mscontrol.api.messages.StopMediaGroup;
 import org.restcomm.connect.mscontrol.api.messages.StopRecording;
 
-import akka.actor.ActorRef;
-import akka.event.Logging;
-import akka.event.LoggingAdapter;
-import jain.protocol.ip.mgcp.message.parms.ConnectionMode;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * @author Henrique Rosa (henrique.rosa@telestax.com)
@@ -219,9 +218,19 @@ public final class MmsConferenceController extends MediaServerController {
             onMediaGroupStateChanged((MediaGroupStateChanged) message, self, sender);
         }*/  else if (JoinCall.class.equals(klass)) {
             onJoinCall((JoinCall) message, self, sender);
-        } else if (Play.class.equals(klass) || StartRecording.class.equals(klass) || StopRecording.class.equals(klass) || StopMediaGroup.class.equals(klass)) {
+        } else if (Play.class.equals(klass) || StartRecording.class.equals(klass) || StopRecording.class.equals(klass)) {
             conferenceMediaResourceController.tell(message, sender);
-        } else if(EndpointStateChanged.class.equals(klass)) {
+        } else if (StopMediaGroup.class.equals(klass)) {
+            StopMediaGroup msg = (StopMediaGroup)message;
+            /* to media-server as media-server will automatically stop beep when it will receive
+             * play command for beep. If a beep wont be played, then conference need to send
+             * EndSignal(StopMediaGroup) to media-server to stop ongoing music-on-hold.
+             * https://github.com/RestComm/Restcomm-Connect/issues/2024
+             */
+            if(!msg.beep()){
+                conferenceMediaResourceController.tell(message, sender);
+            }
+        }else if(EndpointStateChanged.class.equals(klass)) {
             onEndpointStateChanged((EndpointStateChanged) message, self, sender);
         } else if (MediaResourceBrokerResponse.class.equals(klass)) {
             onMediaResourceBrokerResponse((MediaResourceBrokerResponse<?>) message, self, sender);
@@ -427,7 +436,9 @@ public final class MmsConferenceController extends MediaServerController {
 
     private void onEndpointStateChanged(EndpointStateChanged message, ActorRef self, ActorRef sender) throws Exception {
         if (is(stopping)) {
-            if (sender.equals(this.cnfEndpoint) && EndpointState.DESTROYED.equals(message.getState())) {
+            if (sender.equals(this.cnfEndpoint) && (EndpointState.DESTROYED.equals(message.getState()) || EndpointState.FAILED.equals(message.getState()))) {
+                if(EndpointState.FAILED.equals(message.getState()))
+                    logger.error("Could not destroy endpoint on media server. corresponding actor path is: " + this.cnfEndpoint.path());
                 this.cnfEndpoint.tell(new StopObserving(self), self);
                 context().stop(cnfEndpoint);
                 cnfEndpoint = null;

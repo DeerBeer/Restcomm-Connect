@@ -22,7 +22,6 @@
 package org.restcomm.connect.mscontrol.mms;
 
 import akka.actor.ActorRef;
-import akka.actor.ActorSystem;
 import akka.actor.Props;
 import akka.actor.UntypedActor;
 import akka.actor.UntypedActorFactory;
@@ -35,12 +34,16 @@ import org.restcomm.connect.commons.fsm.Action;
 import org.restcomm.connect.commons.fsm.FiniteStateMachine;
 import org.restcomm.connect.commons.fsm.State;
 import org.restcomm.connect.commons.fsm.Transition;
+import org.restcomm.connect.commons.fsm.TransitionFailedException;
+import org.restcomm.connect.commons.fsm.TransitionNotFoundException;
+import org.restcomm.connect.commons.fsm.TransitionRollbackException;
 import org.restcomm.connect.commons.patterns.Observe;
 import org.restcomm.connect.commons.patterns.Observing;
 import org.restcomm.connect.commons.patterns.StopObserving;
 import org.restcomm.connect.commons.util.WavUtils;
 import org.restcomm.connect.dao.DaoManager;
 import org.restcomm.connect.dao.RecordingsDao;
+import org.restcomm.connect.dao.entities.MediaAttributes;
 import org.restcomm.connect.dao.entities.Recording;
 import org.restcomm.connect.mgcp.CreateConferenceEndpoint;
 import org.restcomm.connect.mgcp.DestroyEndpoint;
@@ -54,6 +57,7 @@ import org.restcomm.connect.mscontrol.api.MediaServerController;
 import org.restcomm.connect.mscontrol.api.messages.CreateMediaSession;
 import org.restcomm.connect.mscontrol.api.messages.JoinBridge;
 import org.restcomm.connect.mscontrol.api.messages.JoinCall;
+import org.restcomm.connect.mscontrol.api.messages.MediaGroupResponse;
 import org.restcomm.connect.mscontrol.api.messages.MediaGroupStateChanged;
 import org.restcomm.connect.mscontrol.api.messages.MediaServerControllerStateChanged;
 import org.restcomm.connect.mscontrol.api.messages.MediaServerControllerStateChanged.MediaServerControllerState;
@@ -64,7 +68,6 @@ import org.restcomm.connect.mscontrol.api.messages.Stop;
 import org.restcomm.connect.mscontrol.api.messages.StopMediaGroup;
 
 import javax.sound.sampled.UnsupportedAudioFileException;
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -74,6 +77,7 @@ import java.util.Set;
 
 /**
  * @author Henrique Rosa (henrique.rosa@telestax.com)
+ * @author maria.farooq@telestax.com (Maria Farooq)
  *
  */
 public class MmsBridgeController extends MediaServerController {
@@ -81,7 +85,6 @@ public class MmsBridgeController extends MediaServerController {
     // Logging
     private final LoggingAdapter logger = Logging.getLogger(getContext().system(), this);
 
-    private final ActorSystem system;
     // Finite State Machine
     private final FiniteStateMachine fsm;
     private final State uninitialized;
@@ -110,14 +113,15 @@ public class MmsBridgeController extends MediaServerController {
     private DateTime recordStarted;
     private StartRecording recordingRequest;
 
+    private boolean stoppingStatePending;
+
     // Observers
     private final List<ActorRef> observers;
 
     private Sid callSid;
 
-    public MmsBridgeController(final ActorRef mrb, final ActorSystem system) {
+    public MmsBridgeController(final ActorRef mrb) {
         final ActorRef self = self();
-        this.system = system;
 
         // Finite states
         this.uninitialized = new State("uninitialized", null, null);
@@ -143,6 +147,7 @@ public class MmsBridgeController extends MediaServerController {
         transitions.add(new Transition(creatingMediaGroup, failed));
         transitions.add(new Transition(active, stopping));
         transitions.add(new Transition(stopping, inactive));
+        transitions.add(new Transition(stopping, stopping));
         this.fsm = new FiniteStateMachine(uninitialized, transitions);
         this.fail = Boolean.FALSE;
 
@@ -188,29 +193,30 @@ public class MmsBridgeController extends MediaServerController {
             duration = 0.0;
         }
 
-        if (duration.equals(0.0)) {
+        if (!duration.equals(0.0)) {
+            if(logger.isInfoEnabled()) {
+            logger.info("Call wraping up recording. File already exists, duration: " + duration);
+            }
+
+            final Recording.Builder builder = Recording.builder();
+            builder.setSid(recordingSid);
+            builder.setAccountSid(accountId);
+            builder.setCallSid(callId);
+            builder.setDuration(duration);
+            builder.setApiVersion(runtimeSettings.getString("api-version"));
+            StringBuilder buffer = new StringBuilder();
+            buffer.append("/").append(runtimeSettings.getString("api-version")).append("/Accounts/").append(accountId.toString());
+            buffer.append("/Recordings/").append(recordingSid.toString());
+            builder.setUri(URI.create(buffer.toString()));
+            final Recording recording = builder.build();
+            RecordingsDao recordsDao = daoManager.getRecordingsDao();
+            recordsDao.addRecording(recording, MediaAttributes.MediaType.AUDIO_ONLY);
+            getContext().system().eventStream().publish(recording);
+        } else {
             if(logger.isInfoEnabled()) {
                 logger.info("Call wraping up recording. File doesn't exist since duration is 0");
             }
-            final DateTime end = DateTime.now();
-            duration = new Double((end.getMillis() - recordStarted.getMillis()) / 1000);
-        } else  if(logger.isInfoEnabled()) {
-            logger.info("Call wraping up recording. File already exists, length: " + (new File(recordingUri).length()));
         }
-
-        final Recording.Builder builder = Recording.builder();
-        builder.setSid(recordingSid);
-        builder.setAccountSid(accountId);
-        builder.setCallSid(callId);
-        builder.setDuration(duration);
-        builder.setApiVersion(runtimeSettings.getString("api-version"));
-        StringBuilder buffer = new StringBuilder();
-        buffer.append("/").append(runtimeSettings.getString("api-version")).append("/Accounts/").append(accountId.toString());
-        buffer.append("/Recordings/").append(recordingSid.toString());
-        builder.setUri(URI.create(buffer.toString()));
-        final Recording recording = builder.build();
-        RecordingsDao recordsDao = daoManager.getRecordingsDao();
-        recordsDao.addRecording(recording);
     }
 
     /*
@@ -249,6 +255,19 @@ public class MmsBridgeController extends MediaServerController {
             onEndpointStateChanged((EndpointStateChanged) message, self, sender);
         } else if (MediaResourceBrokerResponse.class.equals(klass)) {
             onMediaResourceBrokerResponse((MediaResourceBrokerResponse<?>) message, self, sender);
+        } else if (MediaGroupResponse.class.equals(klass)) {
+            onMediaGroupResponse((MediaGroupResponse)message);
+        }
+    }
+
+    private void onMediaGroupResponse(MediaGroupResponse message) throws TransitionNotFoundException, TransitionFailedException, TransitionRollbackException {
+        if (logger.isInfoEnabled()) {
+            logger.info("Received MgcpGroupResponse: "+message.toString());
+        }
+        if (recording && stoppingStatePending) {
+            recording = Boolean.FALSE;
+            stoppingStatePending = false;
+            fsm.transition(message, stopping);
         }
     }
 
@@ -347,7 +366,9 @@ public class MmsBridgeController extends MediaServerController {
 
     private void onEndpointStateChanged(EndpointStateChanged message, ActorRef self, ActorRef sender) throws Exception {
         if (is(stopping)) {
-            if (sender.equals(this.endpoint) && EndpointState.DESTROYED.equals(message.getState())) {
+            if (sender.equals(this.endpoint) && (EndpointState.DESTROYED.equals(message.getState()) || EndpointState.FAILED.equals(message.getState()))) {
+                if(EndpointState.FAILED.equals(message.getState()))
+                    logger.error("Could not destroy endpoint on media server. corresponding actor path is: " + this.endpoint.path());
                 this.endpoint.tell(new StopObserving(self), self);
                 context().stop(endpoint);
                 endpoint = null;
@@ -364,16 +385,17 @@ public class MmsBridgeController extends MediaServerController {
             if(logger.isInfoEnabled()) {
                 logger.info("Start recording bridged call");
             }
-            String finishOnKey = "1234567890*#";
-            int maxLength = 3600;
-            int timeout = 5;
+            //14400 = 4hrs to match the max call duration
+            //By setting timeout to 4hrs, we disable Speech Detection for Dial Record scenario
+            int maxLength = 14400;
+            int timeout = 14400;
 
             this.recording = Boolean.TRUE;
             this.recordStarted = DateTime.now();
             this.recordingRequest = message;
 
             // Tell media group to start recording
-            Record record = new Record(message.getRecordingUri(), timeout, maxLength, finishOnKey);
+            Record record = new Record(message.getRecordingUri(), timeout, maxLength, null, MediaAttributes.MediaType.AUDIO_ONLY);
             this.mediaGroup.tell(record, self);
         }
     }
@@ -442,7 +464,7 @@ public class MmsBridgeController extends MediaServerController {
                     return new MgcpMediaGroup(mediaGateway, mediaSession, endpoint);
                 }
             });
-            return system.actorOf(props);
+            return getContext().actorOf(props);
         }
 
         @Override
@@ -478,14 +500,14 @@ public class MmsBridgeController extends MediaServerController {
             // Note: Recording will be added to DB after getting response from MG
             if (recording) {
                 mediaGroup.tell(new Stop(), super.source);
-                recording = Boolean.FALSE;
+                stoppingStatePending = true;
+            } else {
+                // Destroy Media Group
+                mediaGroup.tell(new StopMediaGroup(), super.source);
+
+                // Destroy Bridge Endpoint and its connections
+                endpoint.tell(new DestroyEndpoint(), super.source);
             }
-
-            // Destroy Media Group
-            mediaGroup.tell(new StopMediaGroup(), super.source);
-
-            // Destroy Bridge Endpoint and its connections
-            endpoint.tell(new DestroyEndpoint(), super.source);
         }
     }
 
@@ -503,10 +525,10 @@ public class MmsBridgeController extends MediaServerController {
             if (recording) {
                 mediaGroup.tell(new Stop(), super.source);
                 recording = Boolean.FALSE;
+            } else {
+                // Destroy Media Group
+                mediaGroup.tell(new StopMediaGroup(), super.source);
             }
-
-            // Destroy Media Group
-            mediaGroup.tell(new StopMediaGroup(), super.source);
         }
     }
 

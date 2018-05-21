@@ -24,6 +24,12 @@ rcMod.controller('NumbersCtrl', function ($scope, $resource, $uibModal, $dialog,
     );
   };
 
+  $scope.$watch('query.phone_number', function (phoneNumber) {
+    if (phoneNumber !== undefined) {
+      $scope.getNumbersList(0);
+    }
+  });
+
   // add incoming number -----------------------------------------------------
 /*
 // no modal is used for number registration any more
@@ -51,25 +57,71 @@ rcMod.controller('NumbersCtrl', function ($scope, $resource, $uibModal, $dialog,
   $scope.confirmNumberDelete = function(phone) {
     confirmNumberDelete(phone, $dialog, $scope, RCommNumbers, Notifications);
   };
+  
+//pagination support ----------------------------------------------------------------------------------------------
 
-  $scope.numbersList = RCommNumbers.query({accountSid: $scope.sid});
+  $scope.currentPage = 1; //current page
+  $scope.maxSize = 5; //pagination max size
+  $scope.entryLimit = 10; //max rows for data table
+  $scope.noOfPages = 1; //max rows for data table
+  $scope.reverse = false;
+  $scope.predicate = "phone_number";
+
+  $scope.setEntryLimit = function(limit) {
+    $scope.entryLimit = limit;
+    $scope.currentPage = 1;
+    $scope.getNumbersList($scope.currentPage-1);
+  };
+
+  $scope.pageChanged = function() {
+    $scope.getNumbersList($scope.currentPage-1);
+  };
+
+  $scope.getNumbersList = function(page) {
+    $scope.currentPage = (page || 0) + 1;
+    var params = createSearchParams();
+    RCommNumbers.get($.extend({accountSid: $scope.sid, Page: page, PageSize: $scope.entryLimit}, params), function(data) {
+      $scope.numbersList = data.incomingPhoneNumbers;
+      $scope.totalNumbers = data.total;
+      $scope.noOfPages = data.num_pages;
+      $scope.start = parseInt(data.start) + 1;
+      $scope.end = parseInt(data.end);
+      if ($scope.end !== $scope.totalNumbers) {
+        ++$scope.end;
+      }
+    });
+  };
+
+  var createSearchParams = function() {
+    var params = {};
+    params["SortBy"] = $scope.predicate;
+    params["Reverse"] = $scope.reverse;
+    if ($scope.query && $scope.query.phone_number) {
+      params['PhoneNumber'] = $scope.query.phone_number;
+    }
+
+    return params;
+  };
+ 
+  $scope.getNumbersList(0);
+
 });
 
 // Numbers : Incoming : Details (also used for Modal) --------------------------
 
-rcMod.controller('NumberDetailsCtrl', function ($scope, $stateParams, $location, $dialog, $uibModalInstance, SessionService, RCommNumbers, RCommApps, RCommAvailableNumbers, Notifications, allCountries, providerCountries, localApps, $rootScope, AuthService, Applications) {
+rcMod.controller('NumberDetailsCtrl', function ($scope, $stateParams, $location, $dialog, $uibModalInstance, SessionService, RCommNumbers, RCommAvailableNumbers, Notifications, allCountries, providerCountries, localApps, $rootScope, AuthService, Applications) {
 
-    // are we editing details...
-    //if($scope.phoneSid === $stateParams.phoneSid) {
+  // are we editing details...
+  //if($scope.phoneSid === $stateParams.phoneSid) {
 
-    $scope.sid = SessionService.get("sid");
-    $scope.phoneSid = $stateParams.phoneSid
+  $scope.sid = SessionService.get("sid");
+  $scope.phoneSid = $stateParams.phoneSid
 
-    $scope.numberDetails = RCommNumbers.get({accountSid:$scope.sid, phoneSid: $scope.phoneSid});
+  $scope.numberDetails = RCommNumbers.get({accountSid:$scope.sid, phoneSid: $scope.phoneSid});
 
-    $scope.localVoiceApps = Applications.filterByKind(localApps, 'voice');
-    $scope.localSmsApps = Applications.filterByKind(localApps, 'sms');
-    $scope.localUssdApps = Applications.filterByKind(localApps, 'ussd');
+  $scope.localVoiceApps = Applications.filterByKind(localApps, 'voice');
+  $scope.localSmsApps = Applications.filterByKind(localApps, 'sms');
+  $scope.localUssdApps = Applications.filterByKind(localApps, 'ussd');
 
   //$scope.countries = countries;
   $scope.countries = allCountries;
@@ -97,7 +149,6 @@ rcMod.controller('NumberDetailsCtrl', function ($scope, $stateParams, $location,
     RCommNumbers.update({accountSid: $scope.sid, phoneSid: $scope.phoneSid}, $.param(params),
       function() { // success
         Notifications.success('Number "' + number.phone_number + '" updated successfully!');
-        $rootScope.$broadcast("incoming-number-updated", {phoneSid:$scope.phoneSid, params: params});
         $location.path( "/numbers/incoming" );
       },
       function() { // error
@@ -115,10 +166,10 @@ rcMod.controller('NumberDetailsCtrl', function ($scope, $stateParams, $location,
   $scope.findNumbers = function(areaCode, countryCode) {
     $scope.searching = true;
     $scope.availableNumbers = null;
-    if(countryCode == null || countryCode === "" || countryCode.length == 0 || countryCode.length == 1) {
-		document.getElementById("countryCode").value = "US";
-		countryCode = "US";
-	}
+    if (countryCode === null || countryCode === "" || countryCode.length === 0 || countryCode.length === 1) {
+      document.getElementById("countryCode").value = "US";
+      countryCode = "US";
+    }
     if(countryCode !== "US") {
       $scope.availableNumbers = RCommAvailableNumbers.query({accountSid: $scope.sid, countryCode: countryCode.code});
     } else {
@@ -137,7 +188,7 @@ rcMod.controller('NumberDetailsCtrl', function ($scope, $stateParams, $location,
   }
 });
 
-rcMod.controller('NumberRegisterCtrl', function ($scope, $stateParams, $location, $http, $dialog, SessionService, RCommNumbers, RCommApps, RCommAvailableNumbers, Notifications, allCountries, providerCountries) {
+rcMod.controller('NumberRegisterCtrl', function ($scope, $stateParams, $location, $http, $dialog, SessionService, RCommNumbers, RCommAvailableNumbers, Notifications, allCountries, providerCountries) {
 
   $scope.sid = SessionService.get("sid");
 
@@ -190,25 +241,25 @@ rcMod.controller('NumberRegisterCtrl', function ($scope, $stateParams, $location
     $scope.availableNumbers = RCommAvailableNumbers.query(queryParams);
     $scope.availableNumbers.$promise.then(
       //success
-      function(value){
+      function(value) {
         $scope.searching = false;
       },
       //error
-      function(error){
+      function(error) {
         $scope.searching = false;
       }
     );
-  }
+  };
 
   $scope.nextRange = function() {
     $scope.findNumbers(++$scope.currentPage);
-  }
+  };
 
   $scope.prevRange = function() {
     $scope.findNumbers(--$scope.currentPage);
   }
 
-});;
+});
 
 
 var confirmNumberDelete = function(phone, $dialog, $scope, RCommNumbers, Notifications, $location) {
@@ -219,7 +270,7 @@ var confirmNumberDelete = function(phone, $dialog, $scope, RCommNumbers, Notific
   $dialog.messageBox(title, msg, btns)
     .open()
     .then(function(result) {
-      if (result == "confirm") {
+      if (result === "confirm") {
         RCommNumbers.delete({accountSid:$scope.sid, phoneSid:phone.sid}, {},
           function() {
             Notifications.success('The incoming number "' + phone.phone_number + '" has been deleted.');
@@ -245,12 +296,12 @@ var confirmNumberRegister = function(phone, isSIP, $dialog, $scope, RCommNumbers
   var newCost = phone.cost || 0;
   var title = 'Register Number ' + newNumber;
   var msg = 'Are you sure you want to register incoming number ' + newNumber + ' (' + newFriendly +  ') ? ' + ((isSIP || !newCost) ? '' : 'It will cost you ' + newCost + '.');
-  var btns = [{result:'cancel', label: 'Cancel', cssClass: 'btn-default'}, {result:'confirm', label: 'Register', cssClass: 'btn-primary'}];
+  var btns = [{result:'cancel', label: 'Cancel', cssClass: 'btn-default', id: 'register-number-' + (isSIP ? 'sip' : 'provider') + '-cancel'}, {result:'confirm', label: 'Register', cssClass: 'btn-primary', id: 'register-number-' + (isSIP ? 'sip' : 'provider') + '-confirm'}];
 
   $dialog.messageBox(title, msg, btns)
     .open()
     .then(function(result) {
-      if (result == "confirm") {
+      if (result === "confirm") {
         var params = createNumberParams(phone, isSIP);
         RCommNumbers.register({accountSid: $scope.sid}, $.param(params),
          function(phone, headers) { // success
@@ -289,8 +340,8 @@ var confirmNumberRegister = function(phone, isSIP, $dialog, $scope, RCommNumbers
 };
 
 var createNumberParams = function(number) {
-	createNumberParams(number, false)
-}
+  createNumberParams(number, false)
+};
 
 var createNumberParams = function(number, isSIP) {
   var params = {};
@@ -329,7 +380,7 @@ var createNumberParams = function(number, isSIP) {
   params["ReferApplicationSid"] = number.refer_application_sid; // || number.referApplicationSid;
 
   if(isSIP) {
-	  params["isSIP"] = "true";
+    params["isSIP"] = "true";
   }
 
   for (var prop in params) {

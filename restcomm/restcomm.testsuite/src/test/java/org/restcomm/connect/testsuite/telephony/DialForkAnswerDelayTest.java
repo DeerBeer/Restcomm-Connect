@@ -13,12 +13,11 @@ import org.jboss.arquillian.container.test.api.Deployer;
 import org.jboss.arquillian.container.test.api.Deployment;
 import org.jboss.arquillian.junit.Arquillian;
 import org.jboss.arquillian.test.api.ArquillianResource;
-import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.WebArchive;
-import org.jboss.shrinkwrap.resolver.api.maven.archive.ShrinkWrapMaven;
 import org.junit.*;
 import org.junit.runner.RunWith;
 import org.restcomm.connect.commons.Version;
+import org.restcomm.connect.commons.annotations.FeatureAltTests;
 import org.restcomm.connect.testsuite.http.RestcommCallsTool;
 import org.restcomm.connect.testsuite.tools.MonitoringServiceTool;
 
@@ -31,16 +30,29 @@ import java.util.Arrays;
 import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import static org.cafesip.sipunit.SipAssert.assertLastOperationSuccess;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
+import org.junit.experimental.categories.Category;
+import org.junit.runners.MethodSorters;
+import org.restcomm.connect.commons.annotations.ParallelClassTests;
+import org.restcomm.connect.commons.annotations.SequentialClassTests;
+import org.restcomm.connect.commons.annotations.WithInMinsTests;
+import org.restcomm.connect.testsuite.NetworkPortAssigner;
+import org.restcomm.connect.commons.annotations.UnstableTests;
+import org.restcomm.connect.testsuite.WebArchiveUtil;
 
 /**
  * Tests for the Dial forking
  * Created by gvagenas on 12/19/15.
  */
 @RunWith(Arquillian.class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
+@Category(value={FeatureAltTests.class, SequentialClassTests.class})
 public class DialForkAnswerDelayTest {
 
     private final static Logger logger = Logger.getLogger(CallLifecycleTest.class.getName());
@@ -58,9 +70,11 @@ public class DialForkAnswerDelayTest {
     @ArquillianResource
     URL deploymentUrl;
 
-    //Dial Action URL: http://ACae6e420f425248d6a26948c17a9e2acf:77f8c12cc7b8f8423e5c38b035249166@127.0.0.1:8080/restcomm/2012-04-24/DialAction Method: POST
+    private static int mediaPort = NetworkPortAssigner.retrieveNextPortByFile();
+
+    private static int mockPort = NetworkPortAssigner.retrieveNextPortByFile();
     @Rule
-    public WireMockRule wireMockRule = new WireMockRule(8090); // No-args constructor defaults to port 8080
+    public WireMockRule wireMockRule = new WireMockRule(mockPort);
 
     private static SipStackTool tool1;
     private static SipStackTool tool2;
@@ -71,31 +85,41 @@ public class DialForkAnswerDelayTest {
     // Bob is a simple SIP Client. Will not register with Restcomm
     private SipStack bobSipStack;
     private SipPhone bobPhone;
-    private String bobContact = "sip:bob@127.0.0.1:5090";
+    private static String bobPort = String.valueOf(NetworkPortAssigner.retrieveNextPortByFile());
+    private String bobContact = "sip:bob@127.0.0.1:" + bobPort;
 
     // Alice is a Restcomm Client with VoiceURL. This Restcomm Client can register with Restcomm and whatever will dial the RCML
     // of the VoiceURL will be executed.
     private SipStack aliceSipStack;
     private SipPhone alicePhone;
-    private String aliceContact = "sip:alice@127.0.0.1:5091";
+    private static String alicePort = String.valueOf(NetworkPortAssigner.retrieveNextPortByFile());
+    private String aliceContact = "sip:alice@127.0.0.1:" + alicePort;
 
     // Henrique is a simple SIP Client. Will not register with Restcomm
     private SipStack henriqueSipStack;
     private SipPhone henriquePhone;
-    private String henriqueContact = "sip:henrique@127.0.0.1:5092";
+    private static String henriquePort = String.valueOf(NetworkPortAssigner.retrieveNextPortByFile());
+    private String henriqueContact = "sip:henrique@127.0.0.1:" + henriquePort;
 
     // George is a simple SIP Client. Will not register with Restcomm
     private SipStack georgeSipStack;
     private SipPhone georgePhone;
-    private String georgeContact = "sip:+131313@127.0.0.1:5070";
+    private static String georgePort = String.valueOf(NetworkPortAssigner.retrieveNextPortByFile());
+    private String georgeContact = "sip:+131313@127.0.0.1:" + georgePort;
 
     // Fotini is a simple SIP Client. Will not register with Restcomm
     private SipStack fotiniSipStack;
     private SipPhone fotiniPhone;
-    private String fotiniContact = "sip:fotini@127.0.0.1:5093";
+    private static String fotiniPort = String.valueOf(NetworkPortAssigner.retrieveNextPortByFile());
+    private String fotiniContact = "sip:fotini@127.0.0.1:" + fotiniPort;
 
     private String adminAccountSid = "ACae6e420f425248d6a26948c17a9e2acf";
     private String adminAuthToken = "77f8c12cc7b8f8423e5c38b035249166";
+
+    private static int restcommPort = 5080;
+    private static int restcommHTTPPort = 8080;
+    private static String restcommContact = "127.0.0.1:" + restcommPort;
+    private String dialAliceRcmlWithPlay;
 
     @BeforeClass
     public static void beforeClass() throws Exception {
@@ -106,23 +130,35 @@ public class DialForkAnswerDelayTest {
         tool5 = new SipStackTool("DialForkAnswerDelay5");
     }
 
+    public static void reconfigurePorts() {
+        if (System.getProperty("arquillian_sip_port") != null) {
+            restcommPort = Integer.valueOf(System.getProperty("arquillian_sip_port"));
+            restcommContact = "127.0.0.1:" + restcommPort;
+        }
+        if (System.getProperty("arquillian_http_port") != null) {
+            restcommHTTPPort = Integer.valueOf(System.getProperty("arquillian_http_port"));
+        }
+    }
+
 
     @Before
     public void before() throws Exception {
-        bobSipStack = tool1.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", "5090", "127.0.0.1:5080");
-        bobPhone = bobSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, 5080, bobContact);
+        dialAliceRcmlWithPlay = "<Response><Play>" + deploymentUrl.toString() + "/audio/demo-prompt.wav</Play><Dial><Client>alice</Client></Dial></Response>";
 
-        aliceSipStack = tool2.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", "5091", "127.0.0.1:5080");
-        alicePhone = aliceSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, 5080, aliceContact);
+        bobSipStack = tool1.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", bobPort, restcommContact);
+        bobPhone = bobSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, restcommPort, bobContact);
 
-        henriqueSipStack = tool3.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", "5092", "127.0.0.1:5080");
-        henriquePhone = henriqueSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, 5080, henriqueContact);
+        aliceSipStack = tool2.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", alicePort, restcommContact);
+        alicePhone = aliceSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, restcommPort, aliceContact);
 
-        georgeSipStack = tool4.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", "5070", "127.0.0.1:5080");
-        georgePhone = georgeSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, 5080, georgeContact);
+        henriqueSipStack = tool3.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", henriquePort, restcommContact);
+        henriquePhone = henriqueSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, restcommPort, henriqueContact);
 
-        fotiniSipStack = tool5.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", "5093", "127.0.0.1:5080");
-        fotiniPhone = fotiniSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, 5080, fotiniContact);
+        georgeSipStack = tool4.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", georgePort, restcommContact);
+        georgePhone = georgeSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, restcommPort, georgeContact);
+
+        fotiniSipStack = tool5.initializeSipStack(SipStack.PROTOCOL_UDP, "127.0.0.1", fotiniPort, restcommContact);
+        fotiniPhone = fotiniSipStack.createSipPhone("127.0.0.1", SipStack.PROTOCOL_UDP, restcommPort, fotiniContact);
     }
 
     @After
@@ -166,7 +202,7 @@ public class DialForkAnswerDelayTest {
         Thread.sleep(4000);
     }
 
-    private String dialFork = "<Response><Dial><Client>alice</Client><Sip>sip:henrique@127.0.0.1:5092</Sip><Number>+131313</Number></Dial></Response>";
+    private String dialFork = "<Response><Dial><Client>alice</Client><Sip>sip:henrique@127.0.0.1:" + henriquePort + "</Sip><Number>+131313</Number></Dial></Response>";
 
     @Test
     public synchronized void testDialForkNoAnswerButHenrique() throws InterruptedException, ParseException, MalformedURLException {
@@ -245,7 +281,7 @@ public class DialForkAnswerDelayTest {
         Thread.sleep(2000);
 
         JsonObject metrics = MonitoringServiceTool.getInstance().getMetrics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         assertTrue(liveCalls == 2);
         assertTrue(liveCallsArraySize == 2);
@@ -264,7 +300,7 @@ public class DialForkAnswerDelayTest {
 
         Thread.sleep(10 * 1000);
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
 
         logger.info("About to check the Requests");
@@ -282,10 +318,10 @@ public class DialForkAnswerDelayTest {
         JsonObject cdr = RestcommCallsTool.getInstance().getCall(deploymentUrl.toString(), adminAccountSid, adminAuthToken, callSid);
         JsonObject jsonObj = cdr.getAsJsonObject();
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
+
   //Non regression test for https://telestax.atlassian.net/browse/RESTCOMM-585
     @Test
     public synchronized void testDialForkNoAnswerButFromAliceClient() throws InterruptedException, ParseException, MalformedURLException {
@@ -401,10 +437,10 @@ public class DialForkAnswerDelayTest {
         String status = jsonObj.get("status").getAsString();
         System.out.println("%%%%Status : "+status);
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
+
     @Test
     public synchronized void testDialForkWithBusy() throws InterruptedException, ParseException, MalformedURLException {
         stubFor(get(urlPathEqualTo("/1111"))
@@ -475,7 +511,7 @@ public class DialForkAnswerDelayTest {
         Thread.sleep(2000);
 
         JsonObject metrics = MonitoringServiceTool.getInstance().getMetrics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         logger.info("&&&&& LiveCalls: "+liveCalls);
         logger.info("&&&&& LiveCallsArraySize: "+liveCallsArraySize);
@@ -496,7 +532,7 @@ public class DialForkAnswerDelayTest {
 
         Thread.sleep(10 * 1000);
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
 
         logger.info("About to check the Requests");
@@ -515,10 +551,10 @@ public class DialForkAnswerDelayTest {
         JsonObject jsonObj = cdr.getAsJsonObject();
         logger.info("%%%% CallSID: "+callSid+" Status : "+jsonObj.get("status").getAsString());
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
+
     @Test
     public synchronized void testDialForkWithDecline() throws InterruptedException, ParseException, MalformedURLException {
         stubFor(get(urlPathEqualTo("/1111"))
@@ -588,7 +624,7 @@ public class DialForkAnswerDelayTest {
         assertTrue(!(bobCall.getLastReceivedResponse().getStatusCode() >= 400));
         assertTrue(henriqueCall.waitForAck(50 * 1000));
 
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         assertTrue(liveCalls == 2);
         assertTrue(liveCallsArraySize == 2);
@@ -607,7 +643,7 @@ public class DialForkAnswerDelayTest {
 
         Thread.sleep(10 * 1000);
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
 
         logger.info("About to check the Requests");
@@ -626,11 +662,11 @@ public class DialForkAnswerDelayTest {
         JsonObject jsonObj = cdr.getAsJsonObject();
         logger.info("%%%% CallSID: "+callSid+" Status : "+jsonObj.get("status").getAsString());
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
 
-    private String dialForkWithTimeout = "<Response><Dial timeout=\"2\"><Client>alice</Client><Sip>sip:henrique@127.0.0.1:5092</Sip><Number>+131313</Number></Dial></Response>";
+    private String dialForkWithTimeout = "<Response><Dial timeout=\"2\"><Client>alice</Client><Sip>sip:henrique@127.0.0.1:" + henriquePort + "</Sip><Number>+131313</Number></Dial></Response>";
 
     @Test
     public synchronized void testDialForkNoAnswer() throws InterruptedException, ParseException, MalformedURLException {
@@ -715,7 +751,7 @@ public class DialForkAnswerDelayTest {
         Thread.sleep(1000);
 
         JsonObject metrics = MonitoringServiceTool.getInstance().getMetrics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         logger.info("&&&&& LiveCalls: "+liveCalls);
         logger.info("&&&&& LiveCallsArraySize: "+liveCallsArraySize);
@@ -740,11 +776,12 @@ public class DialForkAnswerDelayTest {
         JsonObject jsonObj = cdr.getAsJsonObject();
         logger.info("Status for call: "+callSid+" : "+jsonObj.get("status").getAsString());
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
 
     @Test
+    @Category(WithInMinsTests.class)
     public synchronized void testDialForkNoAnswerAndNoResponseFromAlice() throws InterruptedException, ParseException, MalformedURLException {
 
         stubFor(get(urlPathEqualTo("/1111"))
@@ -823,7 +860,7 @@ public class DialForkAnswerDelayTest {
         Thread.sleep(1000);
 
         JsonObject metrics = MonitoringServiceTool.getInstance().getMetrics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         logger.info("&&&&& LiveCalls: "+liveCalls);
         logger.info("&&&&& LiveCallsArraySize: "+liveCallsArraySize);
@@ -852,11 +889,11 @@ public class DialForkAnswerDelayTest {
         JsonObject jsonObj = cdr.getAsJsonObject();
         logger.info("Status for call: "+callSid+" : "+jsonObj.get("status").getAsString());
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
 
-    private String dialForkWithTimeout15 = "<Response><Dial timeout=\"15\"><Client>alice</Client><Sip>sip:henrique@127.0.0.1:5092</Sip><Number>+131313</Number></Dial></Response>";
+    private String dialForkWithTimeout15 = "<Response><Dial timeout=\"15\"><Client>alice</Client><Sip>sip:henrique@127.0.0.1:" + henriquePort + "</Sip><Number>+131313</Number></Dial></Response>";
 
     @Test
     public synchronized void testDialForkNoAnswerWith183() throws InterruptedException, ParseException, MalformedURLException {
@@ -933,7 +970,7 @@ public class DialForkAnswerDelayTest {
         assertTrue(bobCall.waitOutgoingCallResponse(5 * 1000));
         assertEquals(Response.REQUEST_TIMEOUT, bobCall.getLastReceivedResponse().getStatusCode());
 
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         logger.info("&&&&& LiveCalls: "+liveCalls);
         logger.info("&&&&& LiveCallsArraySize: "+liveCallsArraySize);
@@ -958,15 +995,16 @@ public class DialForkAnswerDelayTest {
         JsonObject jsonObj = cdr.getAsJsonObject();
         logger.info("Status for call: "+callSid+" : "+jsonObj.get("status").getAsString());
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
-    private String dialForkWithActionUrl = "<Response><Dial timeLimit=\"1000\" timeout=\"2\" action=\"http://127.0.0.1:8090/test\">" +
-            "<Number>+131313</Number><Uri>sip:henrique@127.0.0.1:5092</Uri><Client>alice</Client></Dial></Response>";
-    private String rcmlToReturn = "<Response><Dial timeout=\"50\"><Uri>sip:fotini@127.0.0.1:5093</Uri></Dial></Response>";
+
+    private String dialForkWithActionUrl = "<Response><Dial timeLimit=\"1000\" timeout=\"2\" action=\"http://127.0.0.1:" + mockPort +"/test\">" +
+            "<Number>+131313</Number><Uri>sip:henrique@127.0.0.1:" + henriquePort + "</Uri><Client>alice</Client></Dial></Response>";
+    private String rcmlToReturn = "<Response><Dial timeout=\"50\"><Uri>sip:fotini@127.0.0.1:" + fotiniPort + "</Uri></Dial></Response>";
     //Non regression test for https://telestax.atlassian.net/browse/RESTCOMM-585
     @Test //TODO Fails when the whole test class runs but Passes when run individually
+    @Category(UnstableTests.class)
     public synchronized void testDialForkNoAnswerExecuteRCML_ReturnedFromActionURL() throws InterruptedException, ParseException, MalformedURLException {
 
         stubFor(get(urlPathEqualTo("/1111"))
@@ -1045,7 +1083,7 @@ public class DialForkAnswerDelayTest {
         aliceCall.respondToCancel(aliceCancelTransaction, 200, "OK - Alice", 600);
         henriqueCall.respondToCancel(henriqueCancelTransaction, 200, "OK - Henrique", 600);
 
-//        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+//        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
 //        int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
 //        //There will be the initial call from Bob and the new call to Fotini
 //        logger.info("&&&& LiveCalls: "+liveCalls);
@@ -1069,7 +1107,7 @@ public class DialForkAnswerDelayTest {
         assertTrue(!(bobCall.getLastReceivedResponse().getStatusCode() >= 400));
         fotiniCall.listenForDisconnect();
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
 
         Thread.sleep(2000);
@@ -1097,13 +1135,14 @@ public class DialForkAnswerDelayTest {
         JsonObject cdr = RestcommCallsTool.getInstance().getCall(deploymentUrl.toString(), adminAccountSid, adminAuthToken, callSid);
         JsonObject jsonObj = cdr.getAsJsonObject();
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
+
     private String dialAliceRcml = "<Response><Dial><Client>alice</Client></Dial></Response>";
 
     @Test //TODO Fails when the whole test class runs but Passes when run individually
+    @Category(UnstableTests.class)
     public void testDialClientAlice() throws ParseException, InterruptedException, MalformedURLException {
         stubFor(get(urlPathEqualTo("/1111"))
                 .willReturn(aResponse()
@@ -1143,7 +1182,7 @@ public class DialForkAnswerDelayTest {
         assertTrue(bobCall.sendInviteOkAck());
         assertTrue(aliceCall.waitForAck(5000));
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
 
         Thread.sleep(3000);
@@ -1173,11 +1212,9 @@ public class DialForkAnswerDelayTest {
         JsonObject cdr = RestcommCallsTool.getInstance().getCall(deploymentUrl.toString(), adminAccountSid, adminAuthToken, callSid);
         JsonObject jsonObj = cdr.getAsJsonObject();
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-
-    private String dialAliceRcmlWithPlay = "<Response><Play>http://127.0.0.1:8080/restcomm/audio/demo-prompt.wav</Play><Dial><Client>alice</Client></Dial></Response>";
 
     @Test
     public void testDialClientAliceWithPlay() throws ParseException, InterruptedException, MalformedURLException {
@@ -1219,7 +1256,7 @@ public class DialForkAnswerDelayTest {
                 null, null));
         assertTrue(aliceCall.waitForAck(5000));
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 2);
 
         Thread.sleep(3000);
@@ -1249,11 +1286,11 @@ public class DialForkAnswerDelayTest {
         JsonObject cdr = RestcommCallsTool.getInstance().getCall(deploymentUrl.toString(), adminAccountSid, adminAuthToken, callSid);
         JsonObject jsonObj = cdr.getAsJsonObject();
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
-    private String dialSequential = "<Response><Dial timeout=\"5\"><Sip>sip:nonexistent@127.0.0.1:5566</Sip></Dial><Dial timeout=\"5\"><Sip>sip:nonexistent2@127.0.0.1:6655</Sip></Dial><Dial><Sip>sip:henrique@127.0.0.1:5092</Sip></Dial></Response>";
+
+    private String dialSequential = "<Response><Dial timeout=\"5\"><Sip>sip:nonexistent@127.0.0.1:5566</Sip></Dial><Dial timeout=\"5\"><Sip>sip:nonexistent2@127.0.0.1:6655</Sip></Dial><Dial><Sip>sip:henrique@127.0.0.1:" + henriquePort + "</Sip></Dial></Response>";
 
     @Test
     public synchronized void testDialSequentialFirstCallTimeouts() throws InterruptedException, ParseException, MalformedURLException {
@@ -1303,7 +1340,7 @@ public class DialForkAnswerDelayTest {
         //Wait to cancel the other branches
         Thread.sleep(2000);
 
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         assertTrue(liveCalls == 2);
         assertTrue(liveCallsArraySize == 2);
@@ -1322,7 +1359,7 @@ public class DialForkAnswerDelayTest {
 
         Thread.sleep(10 * 1000);
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
 
         logger.info("About to check the Requests");
@@ -1340,11 +1377,11 @@ public class DialForkAnswerDelayTest {
         JsonObject cdr = RestcommCallsTool.getInstance().getCall(deploymentUrl.toString(), adminAccountSid, adminAuthToken, callSid);
         JsonObject jsonObj = cdr.getAsJsonObject();
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
-    
-    private String dialForkTwoSipUrisRcml = "<Response><Dial><Sip>sip:fotini@127.0.0.1:5093</Sip><Sip>sip:henrique@127.0.0.1:5092</Sip></Dial></Response>";
+
+    private String dialForkTwoSipUrisRcml = "<Response><Dial><Sip>sip:fotini@127.0.0.1:" + fotiniPort + "</Sip><Sip>sip:henrique@127.0.0.1:" + henriquePort + "</Sip></Dial></Response>";
     @Test
     public synchronized void testDialForkWithServerErrorReponse() throws InterruptedException, ParseException, MalformedURLException {
         stubFor(get(urlPathEqualTo("/1111"))
@@ -1397,7 +1434,7 @@ public class DialForkAnswerDelayTest {
         bobCall.sendInviteOkAck();
         assertTrue(!(bobCall.getLastReceivedResponse().getStatusCode() >= 400));
 
-        int liveCalls = MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
+        int liveCalls = MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         int liveCallsArraySize = MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken);
         logger.info("&&&&& LiveCalls: "+liveCalls);
         logger.info("&&&&& LiveCallsArraySize: "+liveCallsArraySize);
@@ -1416,7 +1453,7 @@ public class DialForkAnswerDelayTest {
 
         Thread.sleep(10 * 1000);
 
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
 
         logger.info("About to check the Requests");
@@ -1435,24 +1472,28 @@ public class DialForkAnswerDelayTest {
         JsonObject jsonObj = cdr.getAsJsonObject();
         logger.info("%%%% CallSID: "+callSid+" Status : "+jsonObj.get("status").getAsString());
         assertTrue(jsonObj.get("status").getAsString().equalsIgnoreCase("completed"));
-        assertTrue(MonitoringServiceTool.getInstance().getLiveCalls(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
+        assertTrue(MonitoringServiceTool.getInstance().getStatistics(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
         assertTrue(MonitoringServiceTool.getInstance().getLiveCallsArraySize(deploymentUrl.toString(), adminAccountSid, adminAuthToken) == 0);
     }
     @Deployment(name = "DialForkAnswerDelayTest", managed = true, testable = false)
     public static WebArchive createWebArchiveNoGw() {
         logger.info("Packaging Test App");
-        WebArchive archive = ShrinkWrap.create(WebArchive.class, "restcomm.war");
-        final WebArchive restcommArchive = ShrinkWrapMaven.resolver()
-                .resolve("org.restcomm:restcomm-connect.application:war:" + version).withoutTransitivity()
-                .asSingle(WebArchive.class);
-        archive = archive.merge(restcommArchive);
-        archive.delete("/WEB-INF/sip.xml");
-        archive.delete("/WEB-INF/conf/restcomm.xml");
-        archive.delete("/WEB-INF/data/hsql/restcomm.script");
-        archive.addAsWebInfResource("sip.xml");
-        archive.addAsWebInfResource("restcomm-delay.xml", "conf/restcomm.xml");
-        archive.addAsWebInfResource("restcomm.script_dialForkTest", "data/hsql/restcomm.script");
-        logger.info("Packaged Test App");
-        return archive;
+        reconfigurePorts();
+
+        Map<String,String> replacements = new HashMap();
+        //replace mediaport 2727
+        replacements.put("2727", String.valueOf(mediaPort));
+        replacements.put("8080", String.valueOf(restcommHTTPPort));
+        replacements.put("8090", String.valueOf(mockPort));
+        replacements.put("5080", String.valueOf(restcommPort));
+        replacements.put("5070", String.valueOf(georgePort));
+        replacements.put("5090", String.valueOf(bobPort));
+        replacements.put("5091", String.valueOf(alicePort));
+        replacements.put("5092", String.valueOf(henriquePort));
+        replacements.put("5093", String.valueOf(fotiniPort));
+
+        List<String> resources = new ArrayList(Arrays.asList("hello-play.xml"));
+        return WebArchiveUtil.createWebArchiveNoGw("restcomm-delay.xml",
+                "restcomm.script_dialForkTest",resources, replacements);
     }
 }

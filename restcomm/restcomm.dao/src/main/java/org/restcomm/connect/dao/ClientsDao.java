@@ -32,11 +32,13 @@ public interface ClientsDao {
 
     Client getClient(Sid sid);
 
-    Client getClient(String user);
+    Client getClient(String user, Sid organizationSid);
 
     List<Client> getClients(Sid accountSid);
 
     List<Client> getAllClients();
+
+    List<Client> getClientsByOrg(Sid organizationSid);
 
     void removeClient(Sid sid);
 

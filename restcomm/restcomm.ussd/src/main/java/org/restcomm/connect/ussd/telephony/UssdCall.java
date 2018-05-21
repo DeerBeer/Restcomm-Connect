@@ -19,6 +19,47 @@
  */
 package org.restcomm.connect.ussd.telephony;
 
+import akka.actor.ActorRef;
+import akka.actor.UntypedActorContext;
+import akka.event.Logging;
+import akka.event.LoggingAdapter;
+import org.joda.time.DateTime;
+import org.restcomm.connect.commons.configuration.RestcommConfiguration;
+import org.restcomm.connect.commons.dao.Sid;
+import org.restcomm.connect.commons.faulttolerance.RestcommUntypedActor;
+import org.restcomm.connect.commons.fsm.Action;
+import org.restcomm.connect.commons.fsm.FiniteStateMachine;
+import org.restcomm.connect.commons.fsm.State;
+import org.restcomm.connect.commons.fsm.Transition;
+import org.restcomm.connect.commons.fsm.TransitionEndListener;
+import org.restcomm.connect.commons.patterns.Observe;
+import org.restcomm.connect.commons.patterns.Observing;
+import org.restcomm.connect.commons.patterns.StopObserving;
+import org.restcomm.connect.commons.telephony.CreateCallType;
+import org.restcomm.connect.commons.util.DNSUtils;
+import org.restcomm.connect.dao.CallDetailRecordsDao;
+import org.restcomm.connect.dao.entities.CallDetailRecord;
+import org.restcomm.connect.telephony.api.Answer;
+import org.restcomm.connect.telephony.api.CallInfo;
+import org.restcomm.connect.telephony.api.CallResponse;
+import org.restcomm.connect.telephony.api.CallStateChanged;
+import org.restcomm.connect.telephony.api.GetCallInfo;
+import org.restcomm.connect.telephony.api.GetCallObservers;
+import org.restcomm.connect.telephony.api.InitializeOutbound;
+import org.restcomm.connect.telephony.api.events.UssdStreamEvent;
+import org.restcomm.connect.ussd.commons.UssdRestcommResponse;
+import org.restcomm.connect.ussd.interpreter.UssdInterpreter;
+import scala.concurrent.duration.Duration;
+
+import javax.servlet.sip.Address;
+import javax.servlet.sip.ServletParseException;
+import javax.servlet.sip.SipApplicationSession;
+import javax.servlet.sip.SipFactory;
+import javax.servlet.sip.SipServletMessage;
+import javax.servlet.sip.SipServletRequest;
+import javax.servlet.sip.SipServletResponse;
+import javax.servlet.sip.SipSession;
+import javax.servlet.sip.SipURI;
 import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.URI;
@@ -35,51 +76,11 @@ import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.concurrent.TimeUnit;
 
-import javax.servlet.sip.Address;
-import javax.servlet.sip.ServletParseException;
-import javax.servlet.sip.SipApplicationSession;
-import javax.servlet.sip.SipFactory;
-import javax.servlet.sip.SipServletMessage;
-import javax.servlet.sip.SipServletRequest;
-import javax.servlet.sip.SipServletResponse;
-import javax.servlet.sip.SipSession;
-import javax.servlet.sip.SipURI;
-
-import org.joda.time.DateTime;
-import org.restcomm.connect.commons.configuration.RestcommConfiguration;
-import org.restcomm.connect.dao.CallDetailRecordsDao;
-import org.restcomm.connect.dao.entities.CallDetailRecord;
-import org.restcomm.connect.commons.dao.Sid;
-import org.restcomm.connect.commons.fsm.Action;
-import org.restcomm.connect.commons.fsm.FiniteStateMachine;
-import org.restcomm.connect.commons.fsm.State;
-import org.restcomm.connect.commons.fsm.Transition;
-import org.restcomm.connect.commons.patterns.Observe;
-import org.restcomm.connect.commons.patterns.Observing;
-import org.restcomm.connect.commons.patterns.StopObserving;
-import org.restcomm.connect.telephony.api.Answer;
-import org.restcomm.connect.telephony.api.CallInfo;
-import org.restcomm.connect.telephony.api.CallResponse;
-import org.restcomm.connect.telephony.api.CallStateChanged;
-import org.restcomm.connect.telephony.api.CreateCall;
-import org.restcomm.connect.telephony.api.GetCallInfo;
-import org.restcomm.connect.telephony.api.GetCallObservers;
-import org.restcomm.connect.telephony.api.InitializeOutbound;
-import org.restcomm.connect.ussd.commons.UssdRestcommResponse;
-import org.restcomm.connect.ussd.interpreter.UssdInterpreter;
-
-import akka.actor.ActorRef;
-import akka.actor.UntypedActor;
-import akka.actor.UntypedActorContext;
-import akka.event.Logging;
-import akka.event.LoggingAdapter;
-import scala.concurrent.duration.Duration;
-
 /**
  * @author <a href="mailto:gvagenas@gmail.com">gvagenas</a>
  *
  */
-public class UssdCall extends UntypedActor  {
+public class UssdCall extends RestcommUntypedActor implements TransitionEndListener {
 
     private final LoggingAdapter logger = Logging.getLogger(getContext().system(), this);
 
@@ -109,9 +110,10 @@ public class UssdCall extends UntypedActor  {
     private SipURI from;
     private SipURI to;
     private String transport;
+    private UssdRestcommResponse userUssdRequest;
     private String username;
     private String password;
-    private CreateCall.Type type;
+    private CreateCallType type;
     private long timeout;
     private SipServletRequest invite;
     private SipServletRequest outgoingInvite;
@@ -168,6 +170,7 @@ public class UssdCall extends UntypedActor  {
 
         // Initialize the FSM.
         this.fsm = new FiniteStateMachine(uninitialized, transitions);
+        this.fsm.addTransitionEndListener(this);
         // Initialize the SIP runtime stuff.
         this.factory = factory;
         // Initialize the runtime stuff.
@@ -201,8 +204,8 @@ public class UssdCall extends UntypedActor  {
             to = (SipURI) invite.getTo().getURI();
         final String from = this.from.getUser();
         final String to = this.to.getUser();
-        final CallInfo info = new CallInfo(id, external, type, direction, created, null, name, from, to, invite, lastResponse,
-                false, false, isFromApi, null);
+        final CallInfo info = new CallInfo(id, accountId, external, type, direction, created, null, name, from, to, invite, lastResponse,
+                false, false, isFromApi, null, null);
         return new CallResponse<CallInfo>(info);
     }
 
@@ -220,8 +223,8 @@ public class UssdCall extends UntypedActor  {
         final ListIterator<String> recordRouteHeaders = message.getHeaders("Record-Route");
         final Address contactAddr = factory.createAddress(message.getHeader("Contact"));
 
-        InetAddress contactInetAddress = InetAddress.getByName(((SipURI) contactAddr.getURI()).getHost());
-        InetAddress inetAddress = InetAddress.getByName(realIP);
+        InetAddress contactInetAddress = DNSUtils.getByName(((SipURI) contactAddr.getURI()).getHost());
+        InetAddress inetAddress = DNSUtils.getByName(realIP);
 
         int remotePort = message.getRemotePort();
         int contactPort = ((SipURI)contactAddr.getURI()).getPort();
@@ -312,6 +315,32 @@ public class UssdCall extends UntypedActor  {
         } else if (InitializeOutbound.class.equals(klass)) {
             fsm.transition(message, queued);
         }
+    }
+
+    @Override
+    public void onTransitionEnd(State was, State is, Object event) {
+        UssdStreamEvent.Builder builder = UssdStreamEvent.builder()
+                .setSid(id)
+                .setAccountSid(accountId)
+                .setDirection(UssdStreamEvent.Direction.valueOf(direction))
+                .setFrom(from.getUser())
+                .setTo(to.getUser());
+
+        if (userUssdRequest != null){
+            builder.setStatus(UssdStreamEvent.Status.processing)
+                    .setRequest(getUssdRequestSdrData());
+            userUssdRequest = null;
+        } else {
+            UssdStreamEvent.Status.valueOf(external.toString().toUpperCase().replaceAll("-", "_"));
+        }
+
+        getContext().system()
+                .eventStream()
+                .publish(builder.build());
+    }
+
+    private String getUssdRequestSdrData(){
+        return userUssdRequest.getMessage().trim();
     }
 
     private abstract class AbstractAction implements Action {
@@ -425,6 +454,8 @@ public class UssdCall extends UntypedActor  {
             } else {
                 request = session.createRequest("INFO");
             }
+
+            userUssdRequest = ussdRequest;
             request.setContent(ussdRequest.createUssdPayload().toString().trim(), ussdContentType);
 
             logger.info("Prepared request: \n"+request);

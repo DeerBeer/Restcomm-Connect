@@ -29,6 +29,31 @@ rcFilters.filter('noHTML', function () {
   }
 });
 
+rcFilters.filter('toDuration', function () {
+  return function(timeInSeconds) {
+    if (timeInSeconds < 60) {
+      return timeInSeconds + 's';
+    }
+    else if (timeInSeconds < 60 * 60) {
+      var minutes = parseInt(timeInSeconds / 60, 10);
+      var seconds = timeInSeconds % 60;
+      return minutes + 'm' + seconds + 's';
+    }
+    else {
+      var hours = parseInt(timeInSeconds / 60 / 60, 10);
+      var minutes = parseInt((timeInSeconds - (hours * 60 * 60)) / 60, 10);
+      // var seconds = timeInSeconds % 60;
+      return hours + 'h' + minutes + 'm'; // + seconds + 's';
+    }
+  }
+});
+
+rcFilters.filter("toDate", [ '$filter', function ($filter) {
+  return function(dateStr, format) {
+    return $filter('date')(new Date(dateStr), format);
+  }
+}]);
+
 rcFilters.filter("timeago", function () {
   //time: the time
   //local: compared to what time? default: now
@@ -102,5 +127,28 @@ rcFilters.filter('toTrusted', ['$sce', function($sce){
             return $sce.trustAsHtml(text);
         };
 }]);
+
+// Determines whether an rcml-url refers to an 'RVD' or an 'external' application and returned
+rcFilters.filter('appProvider', function (PublicConfig) {
+    var r = PublicConfig.rvdUrl + '/';
+    return function(rcmlUrl) {
+        if (!!rcmlUrl && rcmlUrl.match(r))
+            return "rvd";
+        else
+            return "external";
+    }
+});
+
+
+// converts a date string to unixDate
+rcFilters.filter('unixDate', function () {
+    return function(dateString) {
+        if (dateString) {
+            var d = new Date(dateString);
+            return d;
+        }
+        return dateString;
+    }
+});
 
 

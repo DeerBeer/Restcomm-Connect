@@ -199,6 +199,16 @@ public abstract class AbstractConverter implements Converter {
         object.addProperty("sid", sid.toString());
     }
 
+    protected void writeDomainName(final String domainName, final HierarchicalStreamWriter writer) {
+        writer.startNode("DomainName");
+        writer.setValue(domainName);
+        writer.endNode();
+    }
+
+    protected void writeDomainName(final String domainName, final JsonObject object) {
+        object.addProperty("domain_name", domainName);
+    }
+
     protected void writeSmsFallbackUrl(final URI smsFallbackUrl, final HierarchicalStreamWriter writer) {
         if (smsFallbackUrl != null) {
             writer.startNode("SmsFallbackUrl");
@@ -436,6 +446,23 @@ public abstract class AbstractConverter implements Converter {
             object.addProperty("voice_application_sid", voiceApplicationSid.toString());
         } else {
             object.add("voice_application_sid", JsonNull.INSTANCE);
+        }
+    }
+
+
+    protected void writePushClientIdentity(final String pushClientIdentity, final HierarchicalStreamWriter writer) {
+        if (pushClientIdentity != null) {
+            writer.startNode("PushClientIdentity");
+            writer.setValue(pushClientIdentity);
+            writer.endNode();
+        }
+    }
+
+    protected void writePushClientIdentity(final String pushClientIdentity, final JsonObject object) {
+        if (pushClientIdentity != null) {
+            object.addProperty("push_client_identity", pushClientIdentity);
+        } else {
+            object.add("push_client_identity", JsonNull.INSTANCE);
         }
     }
 

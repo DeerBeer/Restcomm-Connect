@@ -1,6 +1,9 @@
 = Restcomm Configuration
 
-If you don't use the hosted version of Restcomm, then you will need to install Restcomm in a local environment. The various guides below will guide you on how to do that and install, configure and start Restcomm to fit your local environment
+If you don't use the hosted version of Restcomm, then you will need to install Restcomm in a local environment. The tutorials below will guide you on how to do that and install, configure and start Restcomm to fit your local environment
+
+=== Supported Operating System and Language
+Please note that English is the only supported Linux Operating System Language. In most production deployment, most of our customers use the following English language Linux distribution : Red Hat Enterprise Linux and Ubuntu LTS
 
 == Basic Configuration Resources
 
@@ -9,15 +12,6 @@ There is two different ways to install Restcomm Connect. Either through Docker o
 === Docker Installation and Start
 
 * <<docker/Restcomm - Docker Quick Start Guide.adoc#restcomm-docker,Restcomm Connect Docker Quick Start Guide>>
-* <<docker/Restcomm - Docker Image in OSX host.adoc#restcomm-docker-osx,Restcomm Connect Docker Image in OSX host>>
-* <<docker/Restcomm - Docker Important Ports.adoc#google-cloud,Restcomm Connect Docker Important Ports>>
-* <<docker/Restcomm - Docker Environment Variables.adoc#docker-environment,Restcomm Connect Docker Environment Variables>>
-* <<docker/Restcomm - Docker Advanced Configuration.adoc#docker-advanced,Restcomm Connect Docker Advanced Configuration>>
-* <<docker/Restcomm - Docker Using Self-signed Certificate.adoc#docker-certificate,Restcomm Connect Docker Using Self-signed Certificate>>
-* <<docker/Restcomm - Docker Adding a Jar File to an Existing Container.adoc#docker-jar,Restcomm Connect Docker Adding a Jar File to an Existing Container>>
-* <<docker/Restcomm - Docker How to Load Environment Variable from a File.adoc#docker-certificate,Restcomm Connect Docker How to Load Environment Variable from a File>>
-* <<docker/Restcomm - Docker How to Persist Your Work on a Filesystem.adoc#docker-persist,Restcomm Connect Docker How to Persist Your Work on a Filesystem>>
-* <<docker/Restcomm - Docker Getting started with Telestax RestComm and XMS.adoc#restcomm-docker,Restcomm Connect Docker Integration with PowerMedia XMS>>
 
 === Binary Installation and Start
 
@@ -31,6 +25,7 @@ There is two different ways to install Restcomm Connect. Either through Docker o
 * <<How to get started with Restcomm-Connect and Mysql.adoc#restcomm-connect-mysql,How to get started with Restcomm-Connect and Mysql>>
 * <<Restcomm - Install and Configure Restcomm to use MariaDB.adoc#restcomm-connect-maria,Restcomm - Install and Configure Restcomm Connect to use MariaDB>>
 * <<How to use Mysql schema upgrade scripts.adoc#mysql-schema-upgrade,How to use Mysql schema upgrade scripts>>
+* <<MySQL_Backup_Restore_Scripts.adoc#mysql-backup-restore-scripts,Mysql backup/restore scripts>>
 * <<Restcomm - How to Reset Admin Password.adoc#admin-pwd,How to Reset Admin Password>>
 
 === DID Configuration
@@ -70,13 +65,22 @@ There is two different ways to install Restcomm Connect. Either through Docker o
 * <<ha/Restcomm - Using a Single Mysql Database for 2 Restcomm Servers.adoc#mysql,Using a Single Mysql Database for 2 Restcomm Connect Servers>>
 * <<ha/Restcomm - Single RVD Workspace for two Restcomm Instances.adoc#rvd,Single RVD Workspace for two Restcomm Instances>>
 
-=== IMS related features
+=== IMS GW - B2BUA
 
-* <<ims/Restcomm_IMS_GW.adoc#intro,Restcomm as a WebRTC GW to IMS >>
+* <<ims_b2bua/Restcomm_IMS_GW.adoc#intro,Restcomm-Connect as a WebRTC GW to IMS >>
+* <<ims_b2bua/Restcomm_ActAsProxy.adoc#intro, Restcomm-Connect acting as a generic Proxy>>
 
 === Amazon S3 Integration
 
 * <<s3/Restcomm_S3.adoc#intro,Restcomm Amazon S3 Integration>>
+
+=== Automatic Speech Recognition Integration
+
+* <<asr/asr.adoc#intro,Automatic Speech Recognition Integration>>
+
+== DNS Provisioning Provider to create new domains under restcomm
+
+* <<dns/dns-provisioning.adoc#intro,DNS Integration Configuration>>
 
 == Contributor Resources
 

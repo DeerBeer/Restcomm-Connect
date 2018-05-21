@@ -91,9 +91,10 @@ SslRestCommConf(){
 		CERTIFICATION_FILE="\\\${jboss.server.config.dir}/$TRUSTSTORE_FILE"
 	fi
 	#enable HTTPS and certificate file.
+	#Cipher `TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA` removed because it enables non-secure cipher ECDHE-RSA-DES-CBC3-SHA
 	echo "Will use trust store at location: $CERTIFICATION_FILE"
 	sed -e "s/<\!--connector name=\"https\" \(.*\)>/<connector name=\"https\" \1>/" \
-	-e "s|<ssl name=\"https\" \(.*\)>|<ssl name=\"https\" key-alias=\"$TRUSTSTORE_ALIAS\" password=\"$TRUSTSTORE_PASSWORD\" certificate-key-file=\"$CERTIFICATION_FILE\" cipher-suite=\"TLS_RSA_WITH_3DES_EDE_CBC_SHA,TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_128_CBC_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_256_CBC_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA\" verify-client=\"false\" protocol=\"TLSv1,TLSv1.1,TLSv1.2,SSLv2Hello\" />|" \
+	-e "s|<ssl name=\"https\" \(.*\)>|<ssl name=\"https\" key-alias=\"$TRUSTSTORE_ALIAS\" password=\"$TRUSTSTORE_PASSWORD\" certificate-key-file=\"$CERTIFICATION_FILE\" cipher-suite=\"TLS_RSA_WITH_3DES_EDE_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_128_CBC_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_256_CBC_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA\" verify-client=\"false\" protocol=\"TLSv1,TLSv1.1,TLSv1.2,SSLv2Hello\" />|" \
 	-e "s/<\/connector-->/<\/connector>/" $FILE > $FILE.bak
 	mv $FILE.bak $FILE
 	echo "Properly configured HTTPS Connector to use trustStore file $CERTIFICATION_FILE"
@@ -142,9 +143,28 @@ CertConfigure(){
 MssStackConf(){
 	FILE=$RESTCOMM_CONF/mss-sip-stack.properties
 
-	if  grep -q 'gov.nist.javax.sip.TLS_CLIENT_AUTH_TYPE=Disabled' "$FILE"; then
-   		sed -i '/gov.nist.javax.sip.TLS_CLIENT_AUTH_TYPE=Disabled/,+5d' $FILE
+	if  grep -q "gov.nist.javax.sip.TLS_CLIENT_AUTH_TYPE=${TLS_CLIENT_AUTH_TYPE}" "$FILE"; then
+   		sed -i '/gov.nist.javax.sip.TLS_CLIENT_AUTH_TYPE='"$TLS_CLIENT_AUTH_TYPE"'/,+5d' $FILE
  	fi
+
+        if [ -n "$SSL_PROTOCOLS" ]; then
+            if  grep -q "gov.nist.javax.sip.TLS_CLIENT_PROTOCOLS" "$FILE"; then
+                 sed -i "s|gov.nist.javax.sip.TLS_CLIENT_PROTOCOLS=.*|gov.nist.javax.sip.TLS_CLIENT_PROTOCOLS=$SSL_PROTOCOLS|" $FILE
+            else
+                echo "gov.nist.javax.sip.TLS_CLIENT_PROTOCOLS=$SSL_PROTOCOLS"'' >> $FILE
+            fi
+
+        fi
+
+        if [ -n "$SSL_CIPHER_SUITES" ]; then
+            if  grep -q "gov.nist.javax.sip.ENABLED_CIPHER_SUITES" "$FILE"; then
+                sed -i "s|gov.nist.javax.sip.ENABLED_CIPHER_SUITES=.*|gov.nist.javax.sip.ENABLED_CIPHER_SUITES=$SSL_CIPHER_SUITES|" $FILE
+            else
+                echo 'gov.nist.javax.sip.ENABLED_CIPHER_SUITES='"$SSL_CIPHER_SUITES"'' >> $FILE
+            fi
+
+        fi
+
 
 	if [[ "$TRUSTSTORE_FILE" = /* ]]; then
 		TRUSTSTORE_LOCATION=$TRUSTSTORE_FILE
@@ -155,14 +175,15 @@ MssStackConf(){
     #check for port offset
 	local HTTPS_PORT=$((HTTPS_PORT + PORT_OFFSET))
 
-
-    sed -i '/org.mobicents.ha.javax.sip.LOCAL_SSL_PORT='"$HTTPS_PORT"'/ a \
-    \gov.nist.javax.sip.TLS_CLIENT_AUTH_TYPE=Disabled\
+	#https://github.com/RestComm/Restcomm-Connect/issues/2606
+    sed -i '/org.mobicents.ha.javax.sip.LOCAL_SSL_PORT=.*/ a \
+    \gov.nist.javax.sip.TLS_CLIENT_AUTH_TYPE='"$TLS_CLIENT_AUTH_TYPE"'\
     \javax.net.ssl.keyStore='"$TRUSTSTORE_LOCATION"'\
     \javax.net.ssl.keyStorePassword='" $TRUSTSTORE_PASSWORD"'\
     \javax.net.ssl.trustStorePassword='"$TRUSTSTORE_PASSWORD"'\
     \javax.net.ssl.trustStore='"$TRUSTSTORE_LOCATION"'\
-    \javax.net.ssl.keyStoreType=JKS' $RESTCOMM_CONF/mss-sip-stack.properties
+    \javax.net.ssl.keyStoreType=JKS\
+    ' $RESTCOMM_CONF/mss-sip-stack.properties
 }
 
 
